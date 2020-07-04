@@ -64,3 +64,50 @@ end
 
 argcumval(a::Array{<:AbstractFloat,0}, val) = 0.
 argcumval(a::Array, val) = argcumval(squeezesum(a, dims=(2:ndims(a))), val)
+
+# equilibrium computation
+function optfn!(x, grad, p)
+    if length(grad) > 0
+        grad .= (x .- p)
+    end
+    return 0.5*sum((x .- p).^2)
+end
+
+function eqcon!(x, grad)
+    if length(grad) > 0
+        grad .= 1
+    end
+    return sum(x) - 1
+end
+
+function solveqp(c, dtc, λ)
+    p = dtc .- λ * c
+    x = Variable(length(p))
+    problem = minimize(0.5*sumsquares(x - p), sum(x) == 1, x >= 0.)
+    solve!(problem, () -> SCS.Optimizer(verbose=false))
+    return x.value
+end
+
+"""
+function solveqp(c, dtc, λ)
+    p = dtc .- λ * c
+
+    n = Model(optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0))
+    @variable(n, x[1:length(p)])
+    o = @objective(n, Min, 0.5*sum((x .- p).^2))
+    @constraint(n, sum(x) == 1.)
+    @constraint(n, x .>= 0.)
+    @constraint(n, x .<= 1.)
+
+    soln = JuMP.optimize!(n)
+
+    return round.(JuMP.value.(x), digits=7)
+end
+"""
+
+function proportionalize(x; digits=6)
+    x[x .< 0.] .= 0
+    x = round.(x, digits=digits)
+    x ./= sum(x)
+    return x
+end
