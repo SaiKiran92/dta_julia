@@ -88,26 +88,11 @@ function solveqp(c, dtc, λ)
     return x.value
 end
 
-"""
-function solveqp(c, dtc, λ)
-    p = dtc .- λ * c
-
-    n = Model(optimizer_with_attributes(Ipopt.Optimizer, "print_level" => 0))
-    @variable(n, x[1:length(p)])
-    o = @objective(n, Min, 0.5*sum((x .- p).^2))
-    @constraint(n, sum(x) == 1.)
-    @constraint(n, x .>= 0.)
-    @constraint(n, x .<= 1.)
-
-    soln = JuMP.optimize!(n)
-
-    return round.(JuMP.value.(x), digits=7)
-end
-"""
-
 function proportionalize(x; digits=6)
     x[x .< 0.] .= 0
     x = round.(x, digits=digits)
     x ./= sum(x)
     return x
 end
+
+approxpos(x::Array) = all((x .>= 0.) .| (x .≈ 0.))

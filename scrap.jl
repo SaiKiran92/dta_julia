@@ -122,3 +122,35 @@ end
         revtracs2[i,t] = (t+l-1) + argfilter(x -> x >= t-1, tracker.(states[i,(t+l):revtracs2[i,t+1]]))[1]
     end
 end
+
+c = zeros(size(ocosts)[2:end])
+
+if rtracb == T+1
+    c .= M
+else
+    t = ceil(tracker(st[rtracb]) - 1e-10)
+    if rtraca == rtracb
+        c .= ocosts[rtraca,..] .+ α * (rtraca - t)
+    else
+        fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
+        fracs[1] = clamp(fracs[1], 0., Inf)
+        fracs[2:end] .-= fracs[1:(end-1)]
+        #fracs[end] = clamp(fracs[end], 0., Inf)
+        #fracs[1:(end-1)] .-= fracs[2:end]
+
+        for (f,rt) in zip(fracs, rtraca:rtracb)
+            c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
+        end
+    end
+end
+
+t = floor(tracker(st[rtracb]) + 1e-10)
+fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
+fracs[1] = clamp(fracs[1], 0., Inf)
+fracs[2:end] .-= fracs[1:(end-1)]
+#fracs[end] = clamp(fracs[end], 0., Inf)
+#fracs[1:(end-1)] .-= fracs[2:end]
+
+for (f,rt) in zip(fracs, rtraca:rtracb)
+    c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
+end

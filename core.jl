@@ -63,7 +63,7 @@ function simulate()#(dtchoices, srates)
     for src in sources(net)
         for (snkno,snk) in enumerate(sinks(net))
             for c in 1:nclasses
-                inflows[outlinkids(net,src)[1],:,snkno,c] .= dtchoices[src,snk,c] * trips[src,snk,c]
+                inflows[outlinkids(net,src)[1],:,snkno,c] .= round.(dtchoices[src,snk,c] * trips[src,snk,c], digits=ROUND_DIGITS)
             end
         end
     end
@@ -156,14 +156,16 @@ end
 
 function computecosts()#(states)
     global states, revtracs
+
     revtracs = zeros(Int, nlinks, T)
     for i in 1:nlinks
         l = length(link(net, i))
-        lastt = Int(floor(tracker(states[i,end])))+1
-        revtracs[i,lastt:end] .= T+1
-        revtracs[i,lastt-1] = T
-        for t in (lastt-2):-1:1
-            revtracs[i,t] = (t+l-1) + argfilter(x -> x <= t-1, tracker.(states[i,(t+l):revtracs[i,t+1]]))[end]
+        A = Int.(ceil.(tracker.(states[i,:]) .+ 1e-10))
+
+        revtracs[i,A[end]:end] .= T+1
+        revtracs[i,A[end]-1] = argfilter(x -> x == A[end], A)[1]
+        for t in (A[end]-2):-1:1
+            revtracs[i,t] = (t+l-1) + argfilter(x -> x > t, A[(t+l):revtracs[i,t+1]])[1]
         end
     end
 
@@ -181,14 +183,16 @@ function computecosts()#(states)
     for t in (T-1):-1:1
         for src in srcs
             i = outlinkids(net, src)[1]
-            incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], revtracs[i,t], revtracs[i,t+1])
+            lb = (t == 1) ? length(link(net, i))+1 : revtracs[i,t-1]
+            incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], lb, revtracs[i,t])
         end
 
         for mrg in mrgs
             ili = inlinkids(net,mrg)
             oli = outlinkids(net,mrg)[1]
 
-            incosts[oli,t,..] .= incost(outcosts[oli,..], states[oli,..], revtracs[oli,t], revtracs[oli,t+1])
+            lb = (t == 1) ? length(link(net, oli))+1 : revtracs[oli,t-1]
+            incosts[oli,t,..] .= incost(outcosts[oli,..], states[oli,..], lb, revtracs[oli,t])
 
             outcosts[ili[1],t,..] .= incosts[oli,t,..]
             outcosts[ili[2],t,..] .= incosts[oli,t,..]
@@ -200,7 +204,8 @@ function computecosts()#(states)
 
             # incost computations
             for i in oli
-                incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], revtracs[i,t], revtracs[i,t+1])
+                lb = (t == 1) ? length(link(net, i))+1 : revtracs[i,t-1]
+                incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], lb, revtracs[i,t])
             end
 
             sr = [srates[div][i][t,..] for i in 1:2]
@@ -214,7 +219,7 @@ end
 # UE computation
 function updatechoices!()#(incosts, dtchoices, srates)
     global incosts, dtchoices, srates
-    λ = 1e-3
+    λ = 1e-4
     for src in srcs
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
@@ -260,7 +265,7 @@ function relgap(incosts, dtchoices)
     println(_num/_den)
     return _num/_den
 end
-"""
+
 for i in 1:20
     global dtchoices, srates, incosts, outcosts
     println(i)
@@ -268,9 +273,15 @@ for i in 1:20
     incosts, outcosts = computecosts()#(states)
     relgap(incosts, dtchoices)
     updatechoices!()#(incosts, dtchoices, srates)
+
+    @assert approxpos(inflows)# all((inflows .>= 0.) .| (inflows .≈ 0.))
+    @assert approxpos(outflows)# all(outflows .>= 0.)
+    @assert approxpos(incosts)# all(incosts .>= 0.)
+    @assert approxpos(outcosts)# all(outcosts .>= 0.)
+
 end
+
 """
-
 inflows, outflows, states = simulate()#(dtchoices, srates)
 incosts, outcosts = computecosts()#(states)
 relgap(incosts, dtchoices)
@@ -290,3 +301,4 @@ updatechoices!()
 @assert all(outflows .>= 0.)
 @assert all(incosts .>= 0.)
 @assert all(outcosts .>= 0.)
+"""

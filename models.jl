@@ -43,13 +43,14 @@ function incost(ocosts, st, rtraca, rtracb)
     if rtracb == T+1
         c .= M
     else
-        t = ceil(tracker(st[rtraca]) + 1e-12)
+        t = floor(tracker(st[rtracb]) + 1e-10)
         if rtraca == rtracb
             c .= ocosts[rtraca,..] .+ α * (rtraca - t)
         else
-            fracs = t .- tracker.(st[rtraca:rtracb])
-            fracs[end] = clamp(fracs[end], 0., Inf)
-            fracs[1:(end-1)] .-= fracs[2:end]
+            fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
+            fracs[1] = clamp(fracs[1], 0., 1.)
+            fracs[end] = clamp(fracs[end], 0., 1.)
+            fracs[2:end] .-= fracs[1:(end-1)]
 
             for (f,rt) in zip(fracs, rtraca:rtracb)
                 c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
