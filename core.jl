@@ -113,6 +113,7 @@ function simulate()#(dtchoices, srates)
             oli = outlinkids(net,div)
             s = min(Q, svalue(states[ili,t]))
             r = [min(Q, rvalue(states[li,t])) for li in oli]
+            #println(t, "\t", div, "\t", ili, "\t", decimal(tracker(states[ili,t])))
 
             # calculating flows
             sr = [srates[div][ti][t,..] for ti in 1:2]
@@ -146,6 +147,11 @@ function simulate()#(dtchoices, srates)
 
             sval = round(sval, digits=ROUND_DIGITS)
             rval = round(rval, digits=ROUND_DIGITS)
+            if (sval < 0.) || (rval < 0.)
+                println(sval, "\t", rval)
+                sval = (sval < 0.) ? 0. : sval
+                rval = (rval < 0.) ? 0. : rval
+            end
 
             states[i,t+1] = LinkState(trac+nxttracs[i], sval, rval)
         end
@@ -252,11 +258,11 @@ end
 function relgap(incosts, dtchoices)
     _num, _den = 0., 0.
     for (srcid,src) in enumerate(srcs)
-        i = outlinkids(net, src)
+        i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
             for clsid in 1:nclasses
                 m = minimum(incosts[i,1:Tm,snkid,clsid])
-                a = sum(incosts[i,1:Tm,snkid,clsid] .* dtchoices[src,snk,clsid])
+                a = sum(incosts[i,1:Tm,snkid,clsid] .* dtchoices[src,snk,clsid][1:Tm])
                 _num += (a - m)
                 _den += m
             end
@@ -280,25 +286,3 @@ for i in 1:20
     @assert approxpos(outcosts)# all(outcosts .>= 0.)
 
 end
-
-"""
-inflows, outflows, states = simulate()#(dtchoices, srates)
-incosts, outcosts = computecosts()#(states)
-relgap(incosts, dtchoices)
-updatechoices!()
-
-@assert all(inflows .>= 0.)
-@assert all(outflows .>= 0.)
-@assert all(incosts .>= 0.)
-@assert all(outcosts .>= 0.)
-
-inflows, outflows, states = simulate()#(dtchoices, srates)
-incosts, outcosts = computecosts()#(states)
-relgap(incosts, dtchoices)
-updatechoices!()
-
-@assert all(inflows .>= 0.)
-@assert all(outflows .>= 0.)
-@assert all(incosts .>= 0.)
-@assert all(outcosts .>= 0.)
-"""

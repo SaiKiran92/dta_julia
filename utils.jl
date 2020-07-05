@@ -50,13 +50,13 @@ function argcumval(vec::Vector, val, from=0.)
     vec = vec[from:end]
 
     if vec[1] > val
-        return round(from + (val/vec[1]) * (1 - decimal(from)), digits=30)
+        return round(from + (val/vec[1]) * (1 - decimal(from)), digits=ROUND_DIGITS)
     end
 
     tvec = cumsum(vec) .- val
     try
         i = argfilter(x -> (x > 0.), tvec)[1]
-        return round(i - tvec[i]/vec[i], digits=30)
+        return round(i - tvec[i]/vec[i], digits=ROUND_DIGITS)
     catch BoundsError
         return length(vec)
     end
