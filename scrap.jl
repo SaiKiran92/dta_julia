@@ -1,243 +1,82 @@
-using NLopt
-
-function myfunc(x::Vector, grad::Vector)
-    if length(grad) > 0
-        grad[1] = 0
-        grad[2] = 0.5/sqrt(x[2])
-    end
-    return sqrt(x[2])
-end
-
-function myconstraint(x::Vector, grad::Vector, a, b)
-    if length(grad) > 0
-        grad[1] = 3a * (a*x[1] + b)^2
-        grad[2] = -1
-    end
-    (a*x[1] + b)^3 - x[2]
-end
-
-opt = Opt(:LD_MMA, 2)
-opt.lower_bounds = [-Inf, 0.]
-opt.xtol_rel = 1e-4
-
-opt.min_objective = myfunc
-inequality_constraint!(opt, (x,g) -> myconstraint(x,g,2,0), 1e-8)
-inequality_constraint!(opt, (x,g) -> myconstraint(x,g,-1,1), 1e-8)
-
-(minf,minx,ret) = optimize(opt, [1.234, 5.678])
-numevals = opt.numevals # the number of function evaluations
-println("got $minf at $minx after $numevals iterations (returned $ret)")
 
 
-p = dtc .- λ * c
-
-opt = Opt(:LD_SLSQP, length(p))
-opt.lower_bounds = zeros(length(p))
-opt.upper_bounds = ones(length(p))
-opt.xtol_rel = 1e-15
-
-myfunc(x, grad) = optfn!(x, grad, p)
-
-opt.min_objective = myfunc
-equality_constraint!(opt, eqcon!)
-
-(minf,minx,ret) = optimize(opt, dtc)
-
-using JuMP, Ipopt
-m = Model(Ipopt.Optimizer)
-#m = Model(solver=NLoptSolver(algorithm=:LD_SLSQP))
-
-@variable(m, x[1:2])
-@NLobjective(m, Min, (x[1]-3)^3 + (x[2]-4)^2)
-@NLconstraint(m, (x[1]-1)^2 + (x[2]+1)^3 + exp(-x[1]) <= 1)
-
-JuMP.optimize!(m)
-
-c = zeros(size(ocosts)[2:end])
-
-if rtracb == T+1
-    c .= M
-else
-    t = ceil(tracker(st[rtraca]) + 1e-12)
-    if rtraca == rtracb
-        c .= ocosts[rtraca,..] .+ α * (rtraca - t)
-    else
-        fracs = t .- tracker.(st[rtraca:rtracb])
-        fracs[end] = clamp(fracs[end], 0., Inf)
-        fracs[1:(end-1)] .-= fracs[2:end]
-
-        for (f,rt) in zip(fracs, rtraca:rtracb)
-            c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-        end
-    end
-end
-
-t = ceil(tracker(st[rtraca]) + 1e-12)
-if rtraca == rtracb
-    c .= ocosts[rtraca,..] .+ α * (rtraca - t)
-else
-    fracs = t .- tracker.(st[rtraca:rtracb])
-    fracs[end] = clamp(fracs[end], 0., Inf)
-    fracs[1:(end-1)] .-= fracs[2:end]
-
-    for (f,rt) in zip(fracs, rtraca:rtracb)
-        c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-    end
-end
-
-fracs = t .- tracker.(st[rtraca:rtracb])
-fracs[end] = clamp(fracs[end], 0., Inf)
-fracs[1:(end-1)] .-= fracs[2:end]
-
-for (f,rt) in zip(fracs, rtraca:rtracb)
-    c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-end
-
-revtracs2 = zeros(Int, nlinks, T)
+# reverse states - for computing costs - only trackers needed
+rstates = zeros(nlinks, T+1)
+tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
+toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
 for i in 1:nlinks
     l = length(link(net, i))
-    A = Int.(ceil.(tracker.(states[i,:]) .+ 1e-10))
+    maxt = Int(ceil(tracker(states[i,end])+1e-13))
+    rstates[i,maxt:end] .= T
+    rstates[i,1] = l
 
-    revtracs2[i,A[end]:end] .= T+1
-    revtracs2[i,A[end]-1] = argfilter(x -> x == A[end], A)[1]
-    for t in (A[end]-2):-1:1
-        revtracs2[i,t] = (t+l-1) + argfilter(x -> x > t, A[(t+l):revtracs2[i,t+1]])[1]
-        #revtracs2[i,t] = (t+l-1) + argfilter(x -> x <= t, A[t+l:revtracs2[i,t+1]])[end]
+    # adjustment for roundoffs
+    try
+        global lastinidx = argfilter(x -> x > 0., tinflows[i,:])[end]
+    catch BoundsError
+        # no flow into the link
+        rstates[i,1:(maxt-1)] .= collect(1:(maxt-1)) .+ (l-1)
+        continue
+    end
+    lastoutidx = argfilter(x -> x > 0., toutflows[i,:])[end]
+    rstates[i, (lastinidx+1):(maxt-1)] .= collect((lastinidx+1):(maxt-1)) .+ (l-1)
+
+    for t in 2:lastinidx
+        ui = floor(rstates[i,t-1] + 1e-9)
+        rstates[i,t] = ui + round(argcumval(toutflows[i,ui:end], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
     end
 end
 
-    lastt = Int(floor(tracker(states[i,end])))+1
-    revtracs2[i,lastt:end] .= T+1
 
-    lastt2 = argfilter(x -> x >= lastt-1, tracker.(states[i,:]))[1]
-    revtracs2[i,lastt-1] = lastt2
-
-"""
-    lastt2 = argfilter(x -> x >= lastt-1, tracker.(states[i,1:(lastt-1)]))[1]
-    revtracs2[i,lastt2:(lastt-1)] .= T
-    println(lastt2)
-"""
-    #revtracs2[i,lastt-1] = T
-    for t in (lastt-2):-1:1
-        revtracs2[i,t] = (t+l-1) + argfilter(x -> x >= t-1, tracker.(states[i,(t+l):revtracs2[i,t+1]]))[1]
-    end
+incosts = zeros(nlinks, T, nsinks, nclasses)
+outcosts = zeros(nlinks, T, nsinks, nclasses)
+incosts[:,end,..] .= M
+outcosts[:,end,..] .= M
+for (snkid,snk) in enumerate(snks)
+    i = inlinkids(net, snk)[1]
+    outcosts[i,:,:,1] .= M
+    r = collect(1:T)
+    outcosts[i,:,snkid,1] .= clamp.(trgt .- r, 0., Inf) * β .+ clamp.(r .- trgt, 0., Inf) * γ # overwriting
 end
 
-c = zeros(size(ocosts)[2:end])
-
-if rtracb == T+1
-    c .= M
-else
-    t = ceil(tracker(st[rtracb]) - 1e-10)
-    if rtraca == rtracb
-        c .= ocosts[rtraca,..] .+ α * (rtraca - t)
+function costupdate!(i,t)
+    println(i, " ", t)
+    if rstates[i,t+1] == T
+        incosts[i,t,..] .= M
     else
-        fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
-        fracs[1] = clamp(fracs[1], 0., Inf)
-        fracs[2:end] .-= fracs[1:(end-1)]
-        #fracs[end] = clamp(fracs[end], 0., Inf)
-        #fracs[1:(end-1)] .-= fracs[2:end]
-
-        for (f,rt) in zip(fracs, rtraca:rtracb)
-            c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-        end
+        r = rstates[i,t]:rstates[i,t+1]
+        println(r)
+        println(size(outcosts[i,r,..]))
+        println(size(collect(firstidx(r):lastidx(r))))
+        incosts[i,t,..] .= sum((outcosts[i,r,..] .+ collect(firstidx(r):lastidx(r)) .- t) .* safedivide.(toutflows[i,r], Ref(tinflows[i,t])), dims=1)[1,..]
     end
 end
 
-t = floor(tracker(st[rtracb]) + 1e-10)
-fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
-fracs[1] = clamp(fracs[1], 0., Inf)
-fracs[2:end] .-= fracs[1:(end-1)]
-#fracs[end] = clamp(fracs[end], 0., Inf)
-#fracs[1:(end-1)] .-= fracs[2:end]
-
-for (f,rt) in zip(fracs, rtraca:rtracb)
-    c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-end
-
-
-function argcumval(vec::Vector, val, from=0.)
-    fromi = 0
-    if from > 1.
-        fromi = Int(ceil(from + 1e-13))
-        vec = @view vec[fromi:end]
-        from = decimal(from)
+for t in (T-1):-1:1
+    for src in srcs
+        i = outlinkids(net, src)[1]
+        costupdate!(i,t)
     end
-    cutval = from * vec[1]
-    if vec[1] - cutval >= val
-        return (fromi-1) + from + safedivide(val, vec[1])
-    else
-        val -= (vec[1] - cutval)
-        i, l = 2, length(vec)
-        while (i <= l) && approxpos(val - vec[i])
-            val -= vec[i]
-            i += 1
+
+    for mrg in mrgs
+        ili = inlinkids(net,mrg)
+        oli = outlinkids(net,mrg)[1]
+
+        costupdate!(oli,t)
+
+        outcosts[ili[1],t,..] .= incosts[oli,t,..]
+        outcosts[ili[2],t,..] .= incosts[oli,t,..]
+    end
+
+    for div in divs
+        ili = inlinkids(net,div)[1]
+        oli = outlinkids(net,div)
+
+        for i in ili
+            costupdate!(i,t)
         end
 
-        if (i > l) && approxpos(val)
-            return (fromi-1) + l
-        else
-            return (fromi-1) + i-1 + safedivide(val, vec[i])
-        end
-    end
-end
-
-i, t = 10, 263
-l = length(link(net, i))
-
-ui = floor(rstates[i,t-1] + 1e-9)
-vc = toutflows[i,ui:end]
-val = tinflows[i,t-1]
-from = decimal(rstates[i,t-1])
-z = :zero_exclude
-
-if z == :zeroinclude
-    f = approxpositive
-else
-    f = positive
-end
-cutval = from * vc[1]
-if vc[1] - cutval >= val
-    return from + safedivide(val, vec[1])
-else
-    val -= (vec[1] - cutval)
-    i, l = 2, length(vec)
-    while (i <= l) && f(val - vec[i])
-        val -= vec[i]
-        i += 1
-    end
-
-    if (i > l) && f(val)
-        return l
-    else
-        return i-1 + safedivide(val, vec[i])
-    end
-end
-
-
-
-
-
-vc = toutflows[i,(t-1+l):ceil(rstates[i,t+1] - 1e-11)]
-val = tinflows[i,t]
-from = 0.
-
-argcumval(vc, val)
-
-cutval = from * vc[1]
-if vc[1] - cutval >= val
-    return from + safedivide(val, vc[1])
-else
-    val -= (vc[1] - cutval)
-    i, l = 2, length(vc)
-    while (i <= l) && approxpos(val - vc[i])
-        val -= vec[i]
-        i += 1
-    end
-
-    if (i > l) && approxpos(val)
-        return l
-    else
-        return i-1 + safedivide(val, vc[i])
+        sr = [srates[div][i][t,..] for i in 1:2]
+        outcosts[ili,t,..] .= sr[1] .* incosts[oli[1],t,..] .+ sr[2] .* incosts[oli[2],t,..]
     end
 end

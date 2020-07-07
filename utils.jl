@@ -3,8 +3,8 @@
 safedivide(a, b) = (a+ϵ)/(b+ϵ)
 positive(x::Real) = (x > 0.)
 positive(x::Array) = all(pos.(x))
-approxpositive(x::Real) = (x >= 0.) || (x ≈ 0.) #isapprox(x, 0., atol=ATOL)
-approxpositive(x::Array) = all(approxpos.(x))
+approxpositive(x::Real) = (x >= 0.) || (x ≈ 0.)
+approxpositive(x::Array) = all(approxpositive.(x))
 decimal(a) = a - floor(a)
 Base.getindex(d::Dict{Tuple{T,T}}, i, j) where {T<:Integer} = d[(i,j)]
 argfilter(fn, x) = [i for (i,x) in enumerate(x) if fn(x)]
@@ -18,7 +18,7 @@ function squeeze(a; dims=nothing)
 end
 
 function expand(a; dims)
-    dims = sort([dims...]) .+ (0:length(dims)-1)
+    dims = sort([dims...])# .+ (0:length(dims)-1)
     i = [size(a)...]
     for d in dims
         insert!(i, d, 1)

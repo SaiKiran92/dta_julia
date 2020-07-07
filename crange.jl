@@ -16,10 +16,10 @@ end
 ϵ = 1e-10;
 start(c::ContinuousRange) = c.a
 stop(c::ContinuousRange) = c.b
-firstidx(c::ContinuousRange) = Int(floor(start(c)+ϵ)+1)
+firstidx(c::ContinuousRange) = Int(ceil(start(c)+ϵ))
 lastidx(c::ContinuousRange) = Int(ceil(stop(c)))
 size(c::ContinuousRange) = c.b - c.a
-show(io::IO, c::ContinuousRange) = print(io, repr(first(c)), ':', repr(last(c)))
+show(io::IO, c::ContinuousRange) = print(io, repr(start(c)), ':', repr(stop(c)))
 
 function getindex(v::Array{T}, c::ContinuousRange, rest...) where {T<:AbstractFloat}
     ai,bi = firstidx(c), lastidx(c)

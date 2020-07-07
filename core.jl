@@ -32,29 +32,32 @@ M = 10 * T
 srcs, snks, mrgs, divs = sources(net), sinks(net), merges(net), diverges(net);
 trips = Dict((o,d,c) => demand_level for o in srcs for d in snks for c in 1:nclasses);
 
-# choice initialization
-dtchoices = Dict(k => zeros(T) for k in keys(trips));
-for k in keys(trips)
-    dtchoices[k][1:Tm] .= rand(Tm)
-    dtchoices[k][1:Tm] ./= sum(dtchoices[k][1:Tm])
-    #dtchoices[k][1:Tm] .= 1/Tm
-    #dtchoices[k][1] = 1.
-end
+function initchoices()
+    # choice initialization
+    dtchoices = Dict(k => zeros(T) for k in keys(trips));
+    for k in keys(trips)
+        #dtchoices[k][1:Tm] .= rand(Tm)
+        #dtchoices[k][1:Tm] ./= sum(dtchoices[k][1:Tm])
+        #dtchoices[k][1:Tm] .= 1/Tm
+        dtchoices[k][1] = 1.
+    end
 
-pathvecs = Dict(snk => dijkstra(net, snk) for snk in snks);
-srates = Dict(div => Dict(i => zeros(T, nsinks, nclasses) for i in 1:2) for div in divs);
-for div in divs
-    for (snkno,snk) in enumerate(snks)
-        for cls in 1:nclasses
-            if (outneighbors(net, div)[1] == pathvecs[snk][div])
-                srates[div][1][:,snkno,cls] .= 1.
-            elseif (outneighbors(net, div)[2] == pathvecs[snk][div])
-                srates[div][2][:,snkno,cls] .= 1.
-            else
-                error()
+    pathvecs = Dict(snk => dijkstra(net, snk) for snk in snks);
+    srates = Dict(div => Dict(i => zeros(T, nsinks, nclasses) for i in 1:2) for div in divs);
+    for div in divs
+        for (snkno,snk) in enumerate(snks)
+            for cls in 1:nclasses
+                if (outneighbors(net, div)[1] == pathvecs[snk][div])
+                    srates[div][1][:,snkno,cls] .= 1.
+                elseif (outneighbors(net, div)[2] == pathvecs[snk][div])
+                    srates[div][2][:,snkno,cls] .= 1.
+                else
+                    error()
+                end
             end
         end
     end
+    return (dtchoices, srates)
 end
 
 inflows, outflows, incosts, outcosts, states, revtracs = nothing, nothing, nothing, nothing, nothing, nothing
@@ -149,8 +152,8 @@ function simulate()#(dtchoices, srates)
 
             sval = round(sval, digits=ROUND_DIGITS)
             rval = round(rval, digits=ROUND_DIGITS)
+            #nxttracs[i] = round(nxttracs[i], digits=ROUND_DIGITS)
             if (sval < 0.) || (rval < 0.)
-                println(sval, "\t", rval)
                 sval = (sval < 0.) ? 0. : sval
                 rval = (rval < 0.) ? 0. : rval
             end
@@ -162,69 +165,35 @@ function simulate()#(dtchoices, srates)
     return (inflows, outflows, states)
 end
 
-# reverse states - for computing costs - only trackers needed
-rstates = zeros(nlinks, T+1)
-tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
-toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
-for i in 1:nlinks
-    l = length(link(net, i))
-    maxt = Int(ceil(tracker(states[i,end])+1e-13))
-    rstates[i,maxt:end] .= T
-    rstates[i,1] = l
-
-    # adjustment for roundoffs
-    try
-        global lastinidx = argfilter(x -> x > 0., tinflows[i,:])[end]
-    catch BoundsError
-        # no flow into the link
-        continue
-    end
-    lastoutidx = argfilter(x -> x > 0., toutflows[i,:])[end]
-    rstates[i, (lastinidx+1):(maxt-1)] .= collect((lastinidx+1):(maxt-1)) .+ (l-1)
-
-    for t in 2:lastinidx
-        ui = floor(rstates[i,t-1] + 1e-9)
-        rstates[i,t] = ui + round(argcumval(toutflows[i,ui:end], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
-    end
-end
-
-
-
-
-
-revtracs = zeros(nlinks, T+1)
-tinflows = squeezesum(inflows, dims=(3,4))
-toutflows = squeezesum(outflows, dims=(3,4))
-cinflows = cumsum(tinflows, dims=2)
-coutflows = cumsum(toutflows, dims=2)
-for i in 1:nlinks
-    l = length(link(net,i))
-    revtracs[i,1] = l+1
-    imax = Int(ceil(tracker(states[i,end])))
-    revtracs[i,imax:end] .= T
-
-    lb = l+1
-    for (t,cif) in enumerate(cinflows)
-        while (coutflows[Int(ceil(lb))] > cif) || (Int(ceil(lb)) < t+l)
-            lb = ceil(lb)+1
-        end
-    end
-end
-
-
-
 function computecosts()
-    global states, revtracs
-
-    revtracs = zeros(Int, nlinks, T)
+    global rstates, tinflows, toutflows, incosts, outcosts
+    # reverse states - for computing costs - only trackers needed
+    rstates = zeros(nlinks, T+1)
+    tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
+    toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
     for i in 1:nlinks
+        #println(i)
         l = length(link(net, i))
-        A = Int.(ceil.(tracker.(states[i,:]) .- 1e-10))
+        maxt = Int(ceil(tracker(states[i,end])+1e-13))
+        rstates[i,maxt:end] .= T
+        rstates[i,1] = l
 
-        revtracs[i,A[end]:end] .= T+1
-        revtracs[i,A[end]-1] = argfilter(x -> x == A[end], A)[1]
-        for t in (A[end]-2):-1:1
-            revtracs[i,t] = (t+l-1) + argfilter(x -> x > t, A[(t+l):revtracs[i,t+1]])[1]
+        # adjustment for roundoffs
+        try
+            global lastinidx = argfilter(x -> x > 0., tinflows[i,:])[end]
+        catch BoundsError
+            # no flow into the link
+            rstates[i,1:(maxt-1)] .= collect(1:(maxt-1)) .+ (l-1)
+            continue
+        end
+        lastoutidx = argfilter(x -> x > 0., toutflows[i,:])[end]
+        rstates[i,(lastinidx+1):(lastoutidx-l+1)] .= lastoutidx
+        rstates[i,(lastoutidx-l+2):(maxt-1)] .= collect((lastoutidx-l+2):(maxt-1)) .+ (l-1)
+
+        for t in 2:lastinidx
+            ui = floor(rstates[i,t-1] + 1e-9)
+            println(i, " ", t, " ", ui)
+            rstates[i,t] = ui + round(argcumval(toutflows[i,ui:lastoutidx], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
         end
     end
 
@@ -236,22 +205,35 @@ function computecosts()
         i = inlinkids(net, snk)[1]
         outcosts[i,:,:,1] .= M
         r = collect(1:T)
-        outcosts[i,:,snkid,1] .= 0. #clamp.(trgt .- r, 0., Inf) * β .+ clamp.(r .- trgt, 0., Inf) * γ # overwriting
+        outcosts[i,:,snkid,1] .= clamp.(trgt .- r, 0., Inf) * β .+ clamp.(r .- trgt, 0., Inf) * γ # overwriting
+    end
+
+    function costupdate!(i,t)
+        if rstates[i,t+1] == T
+            incosts[i,t,..] .= M
+        else
+            r = rstates[i,t]:rstates[i,t+1]
+            tmpr = collect(firstidx(r):lastidx(r))
+            if size(tmpr) == (0,) # when rstates[i,t] == rstates[i,t+1] == Int(rstates[i,t])
+                tmpr = firstidx(r)
+                incosts[i,t,..] .= outcosts[i,tmpr,..] .+ tmpr .- t
+            else
+                incosts[i,t,..] .= sum((outcosts[i,r,..] .+ tmpr .- t) .* safedivide.(toutflows[i,r], Ref(tinflows[i,t])), dims=1)[1,..]
+            end
+        end
     end
 
     for t in (T-1):-1:1
         for src in srcs
             i = outlinkids(net, src)[1]
-            lb = (t == 1) ? length(link(net, i))+1 : revtracs[i,t-1]
-            incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], lb, revtracs[i,t])
+            costupdate!(i,t)
         end
 
         for mrg in mrgs
             ili = inlinkids(net,mrg)
             oli = outlinkids(net,mrg)[1]
 
-            lb = (t == 1) ? length(link(net, oli))+1 : revtracs[oli,t-1]
-            incosts[oli,t,..] .= incost(outcosts[oli,..], states[oli,..], lb, revtracs[oli,t])
+            costupdate!(oli,t)
 
             outcosts[ili[1],t,..] .= incosts[oli,t,..]
             outcosts[ili[2],t,..] .= incosts[oli,t,..]
@@ -261,10 +243,8 @@ function computecosts()
             ili = inlinkids(net,div)[1]
             oli = outlinkids(net,div)
 
-            # incost computations
             for i in oli
-                lb = (t == 1) ? length(link(net, i))+1 : revtracs[i,t-1]
-                incosts[i,t,..] .= incost(outcosts[i,..], states[i,..], lb, revtracs[i,t])
+                costupdate!(i,t)
             end
 
             sr = [srates[div][i][t,..] for i in 1:2]
@@ -272,13 +252,13 @@ function computecosts()
         end
     end
 
-    return (incosts, outcosts)
+    return (rstates, incosts, outcosts)
 end
 
 # UE computation
 function updatechoices!()#(incosts, dtchoices, srates)
     global incosts, dtchoices, srates
-    λ = 1e-4
+    λ = 1e-5
     for src in srcs
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
@@ -329,17 +309,21 @@ for i in 1:20
     global dtchoices, srates, incosts, outcosts
     @show i
     inflows, outflows, states = simulate()#(dtchoices, srates)
-    incosts, outcosts = computecosts()#(states)
+    rstates, incosts, outcosts = computecosts()#(states)
     relgap(incosts, dtchoices)
-    updatechoices!()#(incosts, dtchoices, srates)
 
-    @assert approxpos(inflows)# all((inflows .>= 0.) .| (inflows .≈ 0.))
-    @assert approxpos(outflows)# all(outflows .>= 0.)
-    @assert approxpos(incosts)# all(incosts .>= 0.)
-    @assert approxpos(outcosts)# all(outcosts .>= 0.)
+    @assert approxpositive(inflows)# all((inflows .>= 0.) .| (inflows .≈ 0.))
+    @assert approxpositive(outflows)# all(outflows .>= 0.)
+    @assert approxpositive(incosts)# all(incosts .>= 0.)
+    @assert approxpositive(outcosts)# all(outcosts .>= 0.)
+
+    updatechoices!()#(incosts, dtchoices, srates)
 end
 
+dtchoices, srates = initchoices()
+
 inflows, outflows, states = simulate()#(dtchoices, srates)
-incosts, outcosts = computecosts()#(states)
+rstates, incosts, outcosts = computecosts()#(states)
 relgap(incosts, dtchoices)
+
 updatechoices!()
