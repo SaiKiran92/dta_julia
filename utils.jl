@@ -1,8 +1,10 @@
 
 ϵ = 1e-13
 safedivide(a, b) = (a+ϵ)/(b+ϵ)
-approxpos(x::Real) = (x >= 0.) || (x ≈ 0.)
-approxpos(x::Array) = all(approxpos.(x)) #all((x .>= 0.) .| (x .≈ 0.))
+positive(x::Real) = (x > 0.)
+positive(x::Array) = all(pos.(x))
+approxpositive(x::Real) = (x >= 0.) || (x ≈ 0.) #isapprox(x, 0., atol=ATOL)
+approxpositive(x::Array) = all(approxpos.(x))
 decimal(a) = a - floor(a)
 Base.getindex(d::Dict{Tuple{T,T}}, i, j) where {T<:Integer} = d[(i,j)]
 argfilter(fn, x) = [i for (i,x) in enumerate(x) if fn(x)]
@@ -50,42 +52,30 @@ function dijkstra(net::Network{T}, snk::U) where {T<:Integer, U<:Integer}
     childvec
 end
 
-function argcumval(vec::Vector, val, from=0.)
+function argcumval(vec::Vector, val, from=0., z=:zeroinclude)
+    if z == :zeroinclude
+        f = approxpositive
+    else
+        f = positive
+    end
     cutval = from * vec[1]
     if vec[1] - cutval >= val
         return from + safedivide(val, vec[1])
     else
         val -= (vec[1] - cutval)
         i, l = 2, length(vec)
-        while (i <= l) && approxpos(val - vec[i])# (vec[i] <= val)
+        while (i <= l) && f(val - vec[i])
             val -= vec[i]
             i += 1
         end
 
-        if (i > l) && approxpos(val)
+        if (i > l) && f(val)
             return l
         else
             return i-1 + safedivide(val, vec[i])
         end
     end
 end
-
-"""
-function argcumval(vec::Vector, val, from=0.)
-    vec = vec[from:end]
-
-    if vec[1] > val
-        return round(from + (val/vec[1]) * (1 - decimal(from)), digits=30)
-    end
-
-    tvec = cumsum(vec) .- val
-    try
-        i = argfilter(x -> (x > 0.), tvec)[1]
-        return round(i - tvec[i]/vec[i], digits=30)
-    catch BoundsError
-        return length(vec)
-    end
-end"""
 
 argcumval(a::Array{<:AbstractFloat,0}, val) = 0.
 argcumval(a::Array, val) = argcumval(squeezesum(a, dims=(2:ndims(a))), val)

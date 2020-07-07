@@ -154,3 +154,90 @@ fracs[2:end] .-= fracs[1:(end-1)]
 for (f,rt) in zip(fracs, rtraca:rtracb)
     c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
 end
+
+
+function argcumval(vec::Vector, val, from=0.)
+    fromi = 0
+    if from > 1.
+        fromi = Int(ceil(from + 1e-13))
+        vec = @view vec[fromi:end]
+        from = decimal(from)
+    end
+    cutval = from * vec[1]
+    if vec[1] - cutval >= val
+        return (fromi-1) + from + safedivide(val, vec[1])
+    else
+        val -= (vec[1] - cutval)
+        i, l = 2, length(vec)
+        while (i <= l) && approxpos(val - vec[i])
+            val -= vec[i]
+            i += 1
+        end
+
+        if (i > l) && approxpos(val)
+            return (fromi-1) + l
+        else
+            return (fromi-1) + i-1 + safedivide(val, vec[i])
+        end
+    end
+end
+
+i, t = 10, 263
+l = length(link(net, i))
+
+ui = floor(rstates[i,t-1] + 1e-9)
+vc = toutflows[i,ui:end]
+val = tinflows[i,t-1]
+from = decimal(rstates[i,t-1])
+z = :zero_exclude
+
+if z == :zeroinclude
+    f = approxpositive
+else
+    f = positive
+end
+cutval = from * vc[1]
+if vc[1] - cutval >= val
+    return from + safedivide(val, vec[1])
+else
+    val -= (vec[1] - cutval)
+    i, l = 2, length(vec)
+    while (i <= l) && f(val - vec[i])
+        val -= vec[i]
+        i += 1
+    end
+
+    if (i > l) && f(val)
+        return l
+    else
+        return i-1 + safedivide(val, vec[i])
+    end
+end
+
+
+
+
+
+vc = toutflows[i,(t-1+l):ceil(rstates[i,t+1] - 1e-11)]
+val = tinflows[i,t]
+from = 0.
+
+argcumval(vc, val)
+
+cutval = from * vc[1]
+if vc[1] - cutval >= val
+    return from + safedivide(val, vc[1])
+else
+    val -= (vc[1] - cutval)
+    i, l = 2, length(vc)
+    while (i <= l) && approxpos(val - vc[i])
+        val -= vec[i]
+        i += 1
+    end
+
+    if (i > l) && approxpos(val)
+        return l
+    else
+        return i-1 + safedivide(val, vc[i])
+    end
+end

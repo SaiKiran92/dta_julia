@@ -7,6 +7,7 @@ using Convex, SCS
 using EllipsisNotation
 
 ROUND_DIGITS = 8
+ATOL = 0.1^(ROUND_DIGITS)
 
 include("types.jl")
 include("utils.jl")
@@ -161,16 +162,33 @@ function simulate()#(dtchoices, srates)
     return (inflows, outflows, states)
 end
 
+# reverse states - for computing costs - only trackers needed
 rstates = zeros(nlinks, T+1)
-tinflows = squeezesum(inflows, dims=(3,4))
-cinflows = cumsum(squeezesum(outflows, dims=(3,4)), dims=2)
+tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
+toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
 for i in 1:nlinks
     l = length(link(net, i))
+    maxt = Int(ceil(tracker(states[i,end])+1e-13))
+    rstates[i,maxt:end] .= T
     rstates[i,1] = l
-    for i in 2:T+1
-        
+
+    # adjustment for roundoffs
+    try
+        global lastinidx = argfilter(x -> x > 0., tinflows[i,:])[end]
+    catch BoundsError
+        # no flow into the link
+        continue
+    end
+    lastoutidx = argfilter(x -> x > 0., toutflows[i,:])[end]
+    rstates[i, (lastinidx+1):(maxt-1)] .= collect((lastinidx+1):(maxt-1)) .+ (l-1)
+
+    for t in 2:lastinidx
+        ui = floor(rstates[i,t-1] + 1e-9)
+        rstates[i,t] = ui + round(argcumval(toutflows[i,ui:end], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
     end
 end
+
+
 
 
 
