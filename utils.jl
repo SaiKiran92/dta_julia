@@ -77,6 +77,31 @@ function argcumval(vec::Vector, val, from=0., z=:zeroinclude)
     end
 end
 
+function argcumval2(vec::Vector, val, from=0., z=:zeroinclude)
+    if z == :zeroinclude
+        f = approxpositive
+    else
+        f = positive
+    end
+    cutval = from * vec[1]
+    if vec[1] - cutval >= val
+        return from + safedivide(val, vec[1])
+    else
+        val -= (vec[1] - cutval)
+        i, l = 2, length(vec)
+        while (i <= l) && f(val - (vec[i] - vec[i-1]))
+            val -= (vec[i] - vec[i-1])
+            i += 1
+        end
+
+        if (i > l) && f(val)
+            return l
+        else
+            return i-1 + safedivide(val, (vec[i] - vec[i-1]))
+        end
+    end
+end
+
 argcumval(a::Array{<:AbstractFloat,0}, val) = 0.
 argcumval(a::Array, val) = argcumval(squeezesum(a, dims=(2:ndims(a))), val)
 

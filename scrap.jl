@@ -4,6 +4,8 @@
 rstates = zeros(nlinks, T+1)
 tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
 toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
+cinflows = round.(cumsum(tinflows, dims=2), digits=ROUND_DIGITS)
+coutflows = round.(cumsum(toutflows, dims=2), digits=ROUND_DIGITS)
 for i in 1:nlinks
     l = length(link(net, i))
     maxt = Int(ceil(tracker(states[i,end])+1e-13))
@@ -23,7 +25,7 @@ for i in 1:nlinks
 
     for t in 2:lastinidx
         ui = floor(rstates[i,t-1] + 1e-9)
-        rstates[i,t] = ui + round(argcumval(toutflows[i,ui:end], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
+        rstates[i,t] = ui + round(argcumval2(coutflows[i,ui:lastoutidx], cinflows[i,t-1], 0., :zero_exclude), digits=ROUND_DIGITS)
     end
 end
 
@@ -80,3 +82,29 @@ for t in (T-1):-1:1
         outcosts[ili,t,..] .= sr[1] .* incosts[oli[1],t,..] .+ sr[2] .* incosts[oli[2],t,..]
     end
 end
+
+
+i, t = 1,2
+r = rstates[i,t]:rstates[i,t+1]
+tmpr = collect(firstidx(r):lastidx(r))
+if size(tmpr) == (0,) # when rstates[i,t] == rstates[i,t+1] == Int(rstates[i,t])
+    tmpr = firstidx(r)
+    incosts[i,t,..] .= outcosts[i,tmpr,..] .+ tmpr .- t
+else
+    incosts[i,t,..] .= sum((outcosts[i,r,..] .+ tmpr .- t) .* safedivide.(toutflows[i,r], Ref(tinflows[i,t])), dims=1)[1,..]
+end
+
+
+i = 1
+t = 2
+ui = floor(rstates[i,t-1] + 1e-9)
+cinflows[i,t-1]
+#rstates[i,t] = ui + round(argcumval2(coutflows[i,ui:lastoutidx], cinflows[i,t-1], 0., :zero_exclude), digits=ROUND_DIGITS)
+ui + round(argcumval2(coutflows[i,ui:lastoutidx], cinflows[i,t-1], 0., :zero_exclude), digits=ROUND_DIGITS)
+
+t = 3
+ui = floor(rstates[i,t-1] + 1e-9)
+cinflows[i,t-1]
+coutflows[i,ui:lastoutidx]
+#rstates[i,t] = ui + round(argcumval2(coutflows[i,ui:lastoutidx], cinflows[i,t-1], 0., :zero_exclude), digits=ROUND_DIGITS)
+ui + round(argcumval2(coutflows[i,ui:lastoutidx], cinflows[i,t-1], 0., :zero_exclude), digits=ROUND_DIGITS)

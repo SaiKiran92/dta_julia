@@ -3,10 +3,11 @@ using DataStructures
 using Parameters
 #using JuMP, Ipopt
 using Convex, SCS
+using Plots
 
 using EllipsisNotation
 
-ROUND_DIGITS = 8
+ROUND_DIGITS = 6
 ATOL = 0.1^(ROUND_DIGITS)
 
 include("types.jl")
@@ -73,7 +74,7 @@ function simulate()#(dtchoices, srates)
             end
         end
     end
-
+    
     srclinks = [outlinkids(net,src)[1] for src in srcs];
     states = Matrix{Union{Nothing, LinkState}}(fill(nothing, nlinks, T+1));
     for i in 1:nlinks
@@ -166,11 +167,13 @@ function simulate()#(dtchoices, srates)
 end
 
 function computecosts()
-    global rstates, tinflows, toutflows, incosts, outcosts
+    global rstates, tinflows, toutflows, cinflows, coutflows, incosts, outcosts
     # reverse states - for computing costs - only trackers needed
     rstates = zeros(nlinks, T+1)
     tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
     toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
+    cinflows = round.(cumsum(tinflows, dims=2), digits=ROUND_DIGITS)
+    coutflows = round.(cumsum(toutflows, dims=2), digits=ROUND_DIGITS)
     for i in 1:nlinks
         #println(i)
         l = length(link(net, i))
@@ -191,9 +194,9 @@ function computecosts()
         rstates[i,(lastoutidx-l+2):(maxt-1)] .= collect((lastoutidx-l+2):(maxt-1)) .+ (l-1)
 
         for t in 2:lastinidx
-            ui = floor(rstates[i,t-1] + 1e-9)
-            println(i, " ", t, " ", ui)
-            rstates[i,t] = ui + round(argcumval(toutflows[i,ui:lastoutidx], tinflows[i,t-1], decimal(rstates[i,t-1]), :zero_exclude), digits=ROUND_DIGITS)
+            ui = floor(rstates[i,t-1] + (0.1)^(ROUND_DIGITS-1))
+            #println(i, " ", t, " ", ui)
+            rstates[i,t] = ui + round(argcumval2(coutflows[i,ui:lastoutidx] .- coutflows[i,Int(ui)], max(0.,cinflows[i,t-1] .- coutflows[i,Int(ui)]), 0., :zero_exclude), digits=ROUND_DIGITS)
         end
     end
 
@@ -218,7 +221,8 @@ function computecosts()
                 tmpr = firstidx(r)
                 incosts[i,t,..] .= outcosts[i,tmpr,..] .+ tmpr .- t
             else
-                incosts[i,t,..] .= sum((outcosts[i,r,..] .+ tmpr .- t) .* safedivide.(toutflows[i,r], Ref(tinflows[i,t])), dims=1)[1,..]
+                x = safedivide.(toutflows[i,r], Ref(tinflows[i,t])) # floating point issues
+                incosts[i,t,..] .= sum((outcosts[i,tmpr,..] .+ tmpr .- t) .* (x ./ sum(x)), dims=1)[1,..]
             end
         end
     end
@@ -250,6 +254,8 @@ function computecosts()
             sr = [srates[div][i][t,..] for i in 1:2]
             outcosts[ili,t,..] .= sr[1] .* incosts[oli[1],t,..] .+ sr[2] .* incosts[oli[2],t,..]
         end
+
+
     end
 
     return (rstates, incosts, outcosts)
@@ -258,7 +264,7 @@ end
 # UE computation
 function updatechoices!()#(incosts, dtchoices, srates)
     global incosts, dtchoices, srates
-    λ = 1e-5
+    λ = 1e-3
     for src in srcs
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
@@ -298,16 +304,20 @@ function relgap(incosts, dtchoices)
                 a = sum(incosts[i,1:Tm,snkid,clsid] .* dtchoices[src,snk,clsid][1:Tm])
                 _num += (a - m)
                 _den += m
+                if (srcid == 1) && (snkid == 1) && (clsid == 1)
+                    @show a, m
+                end
             end
         end
     end
-    @show (_num/_den)
+    #@show (_num/_den)
     return _num/_den
 end
 
-for i in 1:20
+dtchoices, srates = initchoices()
+for i in 1:30
     global dtchoices, srates, incosts, outcosts
-    @show i
+    #@show i
     inflows, outflows, states = simulate()#(dtchoices, srates)
     rstates, incosts, outcosts = computecosts()#(states)
     relgap(incosts, dtchoices)
@@ -325,5 +335,8 @@ dtchoices, srates = initchoices()
 inflows, outflows, states = simulate()#(dtchoices, srates)
 rstates, incosts, outcosts = computecosts()#(states)
 relgap(incosts, dtchoices)
+plot(dtchoices[1,19,1])
 
 updatechoices!()
+
+relgap(incosts, dtchoices)
