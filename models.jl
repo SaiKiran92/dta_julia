@@ -1,23 +1,56 @@
-function divflows(infl, sr, r, s, frac)
-    sr = [expand(sr[ti], dims=1) for ti in 1:2]
-    f = [squeezesum(infl .* sr[ti], dims=(2,3)) for ti in 1:2]
 
-    strac = argcumval(sum(f), s, frac)
-    rtrac = min(argcumval.(f, r, frac)...)
+"""
+    dflows(fᵢ, sr, r, s, m)
 
-    fintrac = min(strac, rtrac)
-    tflows = vcat([sum(infl[frac:fintrac,..] .* sr[ti], dims=1) for ti in 1:2]...)
-    return (tflows, fintrac - frac)
+Compute flows at a diverging intersection.
+
+# Arguments
+- `fᵢ::Array`: slice from inflows from the range relevant to the computation
+- `sr::Array`: splitting rates
+- `r::Array`: receiving capacities
+- `s::Float`: sending capacity
+- `m::Float`: flow already moved from the first timestep of fᵢ
+
+"""
+function dflows(fᵢ, sr, r, s, m)
+    #sr = Dict(k => expand(v, dims=1) for (k,v) in pairs(sr))
+    mval = [m*sum(fᵢ[1,..] .* sr[i]) for i in 1:2]
+    f = []
+    for (k,v) in pairs(sr)
+        push!(f, squeezesum(fᵢ .* expand(v, dims=1), dims=(2,3)))
+    end
+
+    sva = valarg(sum(f), s, sum(mval))
+    rva = min(valarg.(f, r, mval)...)
+    va = min(sva, rva)
+
+    fₐ = []
+    for (i,(k,v)) in enumerate(pairs(sr))
+        push!(fₐ, argcut(fᵢ, va, m) .* v) #[1,..])
+    end
+
+    return (fₐ, va)
 end
 
-function mrgflows(infl, r, s, fracs)
-    tflows = zeros(2, size(infl[1])[2:end]...)
-    tracs = [0., 0.]
+"""
+    mflows(fᵢ, sr, r, s, m)
+
+Compute flows at a merging intersection.
+
+# Arguments
+- `fᵢ::Array`: slice from inflows from the range relevant to the computation
+- `r::Float`: receiving capacity
+- `s::Array`: sending capacities
+- `m::Float`: flow already moved from the first timestep of fᵢ
+
+"""
+function mflows(fᵢ, r, s, m)
+    fₐ = [zeros(size(fᵢ[1])[2:end]...) for i in 1:2]
+    va = [0., 0.]
 
     function update!(i, cap)
-        tmpfrac = argcumval(squeezesum(infl[i], dims=(2,3)), cap, fracs[i])
-        tflows[i,..] .= sum(infl[i][fracs[i]:tmpfrac,..], dims=1)[1,..]
-        tracs[i] = tmpfrac - fracs[i]
+        va[i] = valarg(fᵢ[i], cap, m[i]*sum(fᵢ[i][1,..]))
+        fₐ[i] .= argcut(fᵢ[i], va[i], m[i])
     end
 
     if r >= sum(s)
@@ -34,29 +67,5 @@ function mrgflows(infl, r, s, fracs)
         update!(2, 0.5*r) #cong
     end
 
-    return (tflows, tracs)
-end
-
-function incost(ocosts, st, rtraca, rtracb)
-    c = zeros(size(ocosts)[2:end])
-
-    if rtracb == T+1
-        c .= M
-    else
-        t = floor(tracker(st[rtracb]) + 1e-10)
-        if rtraca == rtracb
-            c .= ocosts[rtraca,..] .+ α * (rtraca - t)
-        else
-            fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
-            fracs[1] = clamp(fracs[1], 0., 1.)
-            fracs[end] = clamp(fracs[end], 0., 1.)
-            fracs[2:end] .-= fracs[1:(end-1)]
-
-            for (f,rt) in zip(fracs, rtraca:rtracb)
-                c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-            end
-        end
-    end
-
-    return round.(c, digits=ROUND_DIGITS)
+    return (fₐ, va)
 end
