@@ -181,24 +181,23 @@ positive(x::Array) = all(pos.(x))
 approxpositive(x::Real) = (x >= 0.) || (x ≈ 0.)
 approxpositive(x::Array) = all(approxpositive.(x))
 
-t, div = 8, 3
+
+t, div = 157, 3
 
 ili = inlinkids(net,div)[1]
 oli = outlinkids(net,div)
-s = min(Q, svalue(states[ili,t]))
-r = [min(Q, rvalue(states[li,t])) for li in oli]
+s = svalue(states[ili,t])
+r = rvalue.(states[oli,t])
 
 # calculating flows
 sr = [SR[div][ti][t,..] for ti in 1:2]
 trkr = tracker(states[ili,t])
 l = length(link(net, ili))
-#println(size(Fᵢ)[3:end])
 fₐ, va = dflows(((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)), sr, r, s, fracmoved(states[ili,t]))
 
 fᵢ = ((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...))
 m = fracmoved(states[ili,t])
 
-#sr = Dict(k => expand(v, dims=1) for (k,v) in pairs(sr))
 mval = [m*sum(fᵢ[1,..] .* sr[i]) for i in 1:2]
 f = []
 for (k,v) in pairs(sr)
@@ -214,71 +213,182 @@ for (i,(k,v)) in enumerate(pairs(sr))
     push!(fₐ, argcut(fᵢ, va, m) .* v)
 end
 
-3288.0 - 5088.0
-
-1644.0 - 3444
-
-t, mrg = 175, 7
-ili = inlinkids(net,mrg)
-oli = outlinkids(net,mrg)[1]
-s = [min(Q, svalue(states[li,t])) for li in ili]
-r = min(Q, rvalue(states[oli,t]))
-
-# calculating flows
-trkr = tracker.(states[ili,t])
-ls = length.(link.(Ref(net), ili))
-f = [(t > l) ? Fᵢ[li, trkr[i]:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)  for (i,(li,l)) in enumerate(zip(ili, ls))]
-fₐ, va = mflows(f, r, s, fracmoved.(states[ili,t]))
-
-fᵢ = f
-m = fracmoved.(states[ili,t])
-
-fₐ = [zeros(size(fᵢ[1])[2:end]...) for i in 1:2]
-va = [0., 0.]
-
-function update!(i, cap)
-    va[i] = valarg(fᵢ[i], cap, m[i]*sum(fᵢ[i][1,..]))
-    fₐ[i] .= argcut(fᵢ[i], va[i], m[i])
-end
-
-if r >= sum(s)
-    update!(1, s[1]) #free
-    update!(2, s[2]) #free
-elseif s[1] < 0.5*r
-    update!(1, s[1]) #free
-    update!(2, r-s[1]) #cong
-elseif s[2] < 0.5*r
-    update!(1, r-s[2]) #free
-    update!(2, s[2]) #cong
+x, y = a[τ], a[τ+1]
+if y == T+1
+    ECᵢ[i,τ,..] .= M
+elseif x == y
+    ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
 else
-    update!(1, 0.5*r) #cong
-    update!(2, 0.5*r) #cong
-end
-
-r = fᵢ[1]
-j, i = va[i], m[i]
-
-c = zero(r[1,..])
-inti, intj = Int(floor(i))+1, Int(ceil(j))
-if (intj == j)
-    intj -= 1
-    dec = 1.
-else
-    dec = decimal(j)
-end
-
-if inti == intj
-    c .= r[inti,..] .* (j - i)
-else
-    c .= r[inti,..] .* (inti - i)
-    c .+= r[intj,..] .* dec
-    if intj > inti + 1
-        c .+= squeezesum(r[(inti+1):(intj-1),..], dims=1)
+    ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+    ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - ((τ > 1) ? CFᵢ[i,y-1] : 0.)), TFᵢ[i,τ])
+    if y > x+1
+        ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
     end
 end
 
-c .= r[inti,..] .* (inti - i)
-c .+= r[intj,..] .* decimal(j)
-if intj > inti + 1
-    c .+= squeezesum(r[(inti+1):(intj-1),..], dims=1)
+
+function costupdate!(i, τ)
+
 end
+
+x, y = a[i,τ], a[i,τ+1]
+if y == T+1
+    ECᵢ[i,τ,..] .= M
+elseif x == y
+    ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+else
+    ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+    ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - ((τ > 1) ? CFᵢ[i,y-1] : 0.)), TFᵢ[i,τ])
+    if y > x+1
+        ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+    end
+end
+
+ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+if y > x+1
+    ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+end
+
+ECᵢ[i,τ,..] .= round.(ECᵢ[i,τ,..], digits=ROUND_DIGITS)
+
+d, t = 13, 137
+
+ili = inlinkids(net,d)[1]
+oli = outlinkids(net,d)
+s = svalue(states[ili,t])
+r = rvalue.(states[oli,t])
+
+# calculating flows
+sr = [SR[div][ti][t,..] for ti in 1:2]
+trkr = tracker(states[ili,t])
+l = length(link(net, ili))
+fₐ, va = dflows(((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)), sr, r, s, fracmoved(states[ili,t]))
+
+x, y = a[i,τ], a[i,τ+1]
+if y == T+1
+    ECᵢ[i,τ,..] .= M
+elseif x == y
+    ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+else
+    ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+    ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+    if y > x+1
+        ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+    end
+end
+
+ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+if y > x+1
+    ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+end
+
+t, div = 7, 3
+
+ili = inlinkids(net,div)[1]
+oli = outlinkids(net,div)
+s = svalue(states[ili,t])
+r = rvalue.(states[oli,t])
+
+# calculating flows
+sr = [SR[div][ti][t,..] for ti in 1:2]
+trkr = tracker(states[ili,t])
+l = length(link(net, ili))
+fₐ, va = dflows(((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)), sr, r, s, fracmoved(states[ili,t]))
+
+va = round(va, digits=ROUND_DIGITS)
+
+for (i,li) in enumerate(oli)
+    fₐ[i] .= round.(fₐ[i], digits=ROUND_DIGITS)
+    Fᵢ[li,t,..] .= fₐ[i]
+end
+Fₒ[ili,t,..] .= sum(fₐ, dims=1)[1,..]
+
+CFₒ[ili,t] = sum(Fₒ[ili,t,..]) + ((t > 1) ? CFₒ[ili,t-1] : 0.)
+A[ili], fracs[ili] = cumvalarg((@view CFᵢ[ili,:]), CFₒ[ili,t], tracker(states[ili,t]), t - l)
+
+tracker(states[ili,t])
+t-l
+
+
+cumr, v, starti, stopi = (@view CFᵢ[ili,:]), CFₒ[ili,t], tracker(states[ili,t]), t - l
+
+if starti <= 0
+    return (starti+1, 0.)
+end
+i = starti
+while i <= stopi
+    if v < cumr[i]
+        tmp1 = (i > 1) ? cumr[i-1] : 0.
+        tmp2 = (i > 1) ? max(0., cumr[i] - cumr[i-1]) : 0.
+        return (i, safedivide((v - tmp1), tmp2))
+    end
+    i += 1
+end
+
+if v < cumr[i]
+    tmp1 = (i > 1) ? cumr[i-1] : 0.
+    tmp2 = (i > 1) ? max(0., cumr[i] - cumr[i-1]) : cumr[i]
+    return (i, safedivide((v - tmp1), tmp2))
+end
+
+tmp1 = (i > 1) ? cumr[i-1] : 0.
+tmp2 = (i > 1) ? max(0., cumr[i] - cumr[i-1]) : 0.
+
+i, τ = 3, 389
+ili = inlinkids(net,div)[1]
+oli = outlinkids(net,div)
+
+for li in oli
+    costupdate!(li,τ)
+end
+
+i = 1
+x, y = a[i,τ], a[i,τ+1]
+if y == T+1
+    ECᵢ[i,τ,..] .= M
+elseif x == y
+    ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+else
+    tf = max(0., CFₒ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+    ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+    ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+    if y > x+1
+        ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+    end
+end
+
+
+tf = max(0., CFₒ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+
+τ, d = 140, 3
+
+ili = inlinkids(net,d)[1]
+oli = outlinkids(net,d)
+
+i = ili
+x, y = a[i,τ], a[i,τ+1]
+if y == T+1
+    ECᵢ[i,τ,..] .= M
+elseif x == y
+    ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+else
+    tf = max(0., CFₒ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+    ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+    ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+    #ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+    #ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+    if y > x+1
+        ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+    end
+end
+
+tf = max(0., CFᵢ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+
+safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)

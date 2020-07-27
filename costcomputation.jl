@@ -1,119 +1,108 @@
+a, TFᵢ, TFₒ = nothing, nothing, nothing
 
-function incost(ocosts, st, rtraca, rtracb)
-    c = zeros(size(ocosts)[2:end])
-
-    if rtracb == T+1
-        c .= M
-    else
-        t = floor(tracker(st[rtracb]) + 1e-10)
-        if rtraca == rtracb
-            c .= ocosts[rtraca,..] .+ α * (rtraca - t)
-        else
-            fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
-            fracs[1] = clamp(fracs[1], 0., 1.)
-            fracs[end] = clamp(fracs[end], 0., 1.)
-            fracs[2:end] .-= fracs[1:(end-1)]
-
-            for (f,rt) in zip(fracs, rtraca:rtracb)
-                c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
-            end
-        end
-    end
-
-    return round.(c, digits=ROUND_DIGITS)
+struct LinkCostState
+    trac
 end
+tracker(s::LinkCostState) = s.trac
 
 function computecosts()
-    global rstates, tinflows, toutflows, Nᵢ, Nₒ, Cᵢ, Cₒ
-    # reverse states - for computing costs - only trackers needed
-    rstates = zeros(nlinks, T+1)
-    tinflows = round.(squeezesum(inflows, dims=(3,4)), digits=ROUND_DIGITS)
-    toutflows = round.(squeezesum(outflows, dims=(3,4)), digits=ROUND_DIGITS)
-    Nᵢ = round.(cumsum(tinflows, dims=2), digits=ROUND_DIGITS)
-    Nₒ = round.(cumsum(toutflows, dims=2), digits=ROUND_DIGITS)
+    global a, net, Fᵢ, Fₒ, TFᵢ, TFₒ, CFᵢ, CFₒ, states, ECᵢ, ECₒ
+
+    rstates = Matrix{Union{Nothing, LinkCostState}}(fill(nothing, nlinks, T+1)); #zeros(Int, nlinks, T+1)
     for i in 1:nlinks
-        #println(i)
         l = length(link(net, i))
-        maxt = Int(ceil(tracker(states[i,end])+1e-13))
-        rstates[i,maxt:end] .= T
-        rstates[i,1] = l
-
-        # adjustment for roundoffs
-        try
-            global lastinidx = argfilter(x -> x > 0., tinflows[i,:])[end]
-        catch BoundsError
-            # no flow into the link
-            rstates[i,1:(maxt-1)] .= collect(1:(maxt-1)) .+ (l-1)
-            continue
-        end
-        lastoutidx = argfilter(x -> x > 0., toutflows[i,:])[end]
-        rstates[i,(lastinidx+1):(lastoutidx-l+1)] .= lastoutidx
-        rstates[i,(lastoutidx-l+2):(maxt-1)] .= collect((lastoutidx-l+2):(maxt-1)) .+ (l-1)
-
-        for t in 2:lastinidx
-            ui = floor(rstates[i,t-1] + (0.1)^(ROUND_DIGITS-1))
-            #println(i, " ", t, " ", ui)
-            rstates[i,t] = ui + round(argcumval2(Nₒ[i,ui:lastoutidx] .- Nₒ[i,Int(ui)], max(0.,Nᵢ[i,t-1] .- Nₒ[i,Int(ui)]), 0., :zero_exclude), digits=ROUND_DIGITS)
-        end
+        # a link of length 2 - min. time for outflow is 3 => at the beginning of time 1, (-1, 0.)
+        rstates[i,(T+1-l):end] .= LinkCostState(l+1)
     end
 
-    Cᵢ = zeros(nlinks, T, nsinks, nclasses)
-    Cₒ = zeros(nlinks, T, nsinks, nclasses)
-    Cᵢ[:,end,..] .= M
-    Cₒ[:,end,..] .= M
+    """
+    for i in 1:nlinks
+        τ, newτ = 1, NaN
+        l = length(link(net, i))
+        t = a[i,τ] = l+1
+        while t <= T
+            newτ = tracker(states[i,t])
+            if newτ > τ
+                if newτ > τ+1
+                    a[i,(τ+1):(newτ-1)] .= t-1
+                end
+                τ = newτ
+                a[i,τ] = t
+            end
+            t += 1
+        end
+
+        a[i,(newτ+1):end] .= T+1
+    end"""
+
+    TFᵢ = squeezesum(Fᵢ, dims=(3,4))
+    TFₒ = squeezesum(Fₒ, dims=(3,4))
+
+    ECᵢ, ECₒ = zero(Fᵢ), zero(Fₒ);
+    ECᵢ[:,end,..] .= M
+    ECₒ[:,end,..] .= M
     for (snkid,snk) in enumerate(snks)
         i = inlinkids(net, snk)[1]
-        Cₒ[i,:,:,1] .= M
+        ECₒ[i,:,:,1] .= M
         r = collect(1:T)
-        Cₒ[i,:,snkid,1] .= clamp.(trgt .- r, 0., Inf) * β .+ clamp.(r .- trgt, 0., Inf) * γ # overwriting
+        ECₒ[i,:,snkid,1] .= clamp.(trgt .- r, 0., Inf) * β .+ clamp.(r .- trgt, 0., Inf) * γ # overwriting
     end
 
-    function costupdate!(i,t)
-        if rstates[i,t+1] == T
-            Cᵢ[i,t,..] .= M
+    function costupdate!(i, τ)
+        y = tracker(rstates[i,τ+1])
+        if (τ > 1) & (CFᵢ[i,τ-1] > CFₒ[i,end])
+            ECᵢ[i,τ,..] .= M
         else
-            r = rstates[i,t]:rstates[i,t+1]
-            tmpr = collect(firstidx(r):lastidx(r))
-            if size(tmpr) == (0,) # when rstates[i,t] == rstates[i,t+1] == Int(rstates[i,t])
-                tmpr = firstidx(r)
-                Cᵢ[i,t,..] .= Cₒ[i,tmpr,..] .+ tmpr .- t
-            else
-                x = safedivide.(toutflows[i,r], Ref(tinflows[i,t])) # floating point issues
-                Cᵢ[i,t,..] .= sum((Cₒ[i,tmpr,..] .+ tmpr .- t) .* (x ./ sum(x)), dims=1)[1,..]
-            end
+            
         end
     end
 
-    for t in (T-1):-1:1
+    function costupdate!(i, τ)
+        x, y = a[i,τ], a[i,τ+1]
+        if y == T+1
+            ECᵢ[i,τ,..] .= M
+        elseif x == y
+            ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+        else
+            tf = max(0., CFᵢ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+            ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+            ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+            #ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+            #ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+            if y > x+1
+                ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+            end
+        end
+
+        ECᵢ[i,τ,..] .= round.(ECᵢ[i,τ,..], digits=ROUND_DIGITS)
+    end
+
+    for τ in T:-1:1
         for src in srcs
             i = outlinkids(net, src)[1]
-            costupdate!(i,t)
+            costupdate!(i,τ)
         end
 
         for mrg in mrgs
             ili = inlinkids(net,mrg)
             oli = outlinkids(net,mrg)[1]
 
-            costupdate!(oli,t)
+            costupdate!(oli,τ)
 
-            Cₒ[ili[1],t,..] .= Cᵢ[oli,t,..]
-            Cₒ[ili[2],t,..] .= Cᵢ[oli,t,..]
+            ECₒ[ili[1],τ,..] .= ECᵢ[oli,τ,..]
+            ECₒ[ili[2],τ,..] .= ECᵢ[oli,τ,..]
         end
 
         for div in divs
             ili = inlinkids(net,div)[1]
             oli = outlinkids(net,div)
 
-            for i in oli
-                costupdate!(i,t)
+            for li in oli
+                costupdate!(li,τ)
             end
 
-            sr = [SR[div][i][t,..] for i in 1:2]
-            Cₒ[ili,t,..] .= sr[1] .* Cᵢ[oli[1],t,..] .+ sr[2] .* Cᵢ[oli[2],t,..]
+            sr = [SR[div][i][τ,..] for i in 1:2]
+            ECₒ[ili,τ,..] .= sr[1] .* ECᵢ[oli[1],τ,..] .+ sr[2] .* ECᵢ[oli[2],τ,..]
         end
-
-
     end
-
-    return (rstates, Cᵢ, Cₒ)
 end

@@ -27,10 +27,10 @@ function initchoices()
     # choice initialization
     DTC = Dict(k => zeros(T) for k in keys(trips));
     for k in keys(trips)
-        DTC[k][1:Tm] .= rand(Tm)
-        DTC[k][1:Tm] ./= sum(DTC[k][1:Tm])
+        #DTC[k][1:Tm] .= rand(Tm)
+        #DTC[k][1:Tm] ./= sum(DTC[k][1:Tm])
         #DTC[k][1:Tm] .= 1/Tm
-        #DTC[k][1] = 1.
+        DTC[k][1] = 1.
     end
 
     pathvecs = Dict(snk => dijkstra(net, snk) for snk in snks);

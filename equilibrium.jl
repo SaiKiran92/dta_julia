@@ -1,30 +1,30 @@
 
 # UE computation
-function updatechoices!()#(incosts, dtchoices, srates)
-    global incosts, dtchoices, srates
+function updatechoices!()#(ECᵢ, DTC, SR)
+    global ECᵢ, DTC, SR
     λ = 1e-3
     for src in srcs
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
             for clsid in 1:nclasses
-                c = incosts[i,1:Tm,snkid,clsid]
-                dtc = dtchoices[src,snk,clsid][1:Tm]
+                c = ECᵢ[i,1:Tm,snkid,clsid]
+                dtc = DTC[src,snk,clsid][1:Tm]
                 newdtc = proportionalize(solveqp(c, dtc, λ))[:,1]
-                dtchoices[src,snk,clsid][1:Tm] .= newdtc
+                DTC[src,snk,clsid][1:Tm] .= newdtc
             end
         end
     end
 
     for div in divs
-        ili = inlinkids(net, div)
+        oli = outlinkids(net, div)
         for t in 1:T
             for (snkid,snk) in enumerate(snks)
                 for clsid in 1:nclasses
-                    sr = [srates[div][i][t, snkid,clsid] for i in 1:2]
-                    c = incosts[ili,t,snkid,clsid]
+                    sr = [SR[div][i][t, snkid,clsid] for i in 1:2]
+                    c = ECᵢ[oli,t,snkid,clsid]
                     newsr = proportionalize(solveqp(c, sr, λ))[:,1]
                     for i in 1:2
-                        srates[div][i][t,snkid,clsid] = newsr[i]
+                        SR[div][i][t,snkid,clsid] = newsr[i]
                     end
                 end
             end
@@ -32,19 +32,16 @@ function updatechoices!()#(incosts, dtchoices, srates)
     end
 end
 
-function relgap(incosts, dtchoices)
+function relgap(ECᵢ, DTC)
     _num, _den = 0., 0.
     for (srcid,src) in enumerate(srcs)
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
             for clsid in 1:nclasses
-                m = minimum(incosts[i,1:Tm,snkid,clsid])
-                a = sum(incosts[i,1:Tm,snkid,clsid] .* dtchoices[src,snk,clsid][1:Tm])
+                m = minimum(ECᵢ[i,1:Tm,snkid,clsid])
+                a = sum(ECᵢ[i,1:Tm,snkid,clsid] .* DTC[src,snk,clsid][1:Tm])
                 _num += (a - m)
                 _den += m
-                if (srcid == 1) && (snkid == 1) && (clsid == 1)
-                    @show a, m
-                end
             end
         end
     end
@@ -72,6 +69,9 @@ function solveqp(c, dtc, λ)
     x = Variable(length(p))
     problem = minimize(0.5*sumsquares(x - p), sum(x) == 1, x >= 0.)
     solve!(problem, () -> SCS.Optimizer(verbose=false))
+    if (problem.status != MOI.OPTIMAL)
+        @show c, dtc, λ
+    end
     return x.value
 end
 

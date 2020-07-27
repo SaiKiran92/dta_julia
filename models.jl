@@ -13,7 +13,6 @@ Compute flows at a diverging intersection.
 
 """
 function dflows(fᵢ, sr, r, s, m)
-    #sr = Dict(k => expand(v, dims=1) for (k,v) in pairs(sr))
     mval = [m*sum(fᵢ[1,..] .* sr[i]) for i in 1:2]
     f = []
     for (k,v) in pairs(sr)
@@ -26,7 +25,7 @@ function dflows(fᵢ, sr, r, s, m)
 
     fₐ = []
     for (i,(k,v)) in enumerate(pairs(sr))
-        push!(fₐ, argcut(fᵢ, va, m) .* v) #[1,..])
+        push!(fₐ, argcut(fᵢ, va, m) .* v)
     end
 
     return (fₐ, va)

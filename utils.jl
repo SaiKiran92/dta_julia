@@ -1,6 +1,6 @@
 
 ϵ = 1e-13
-safedivide(a, b) = (a+ϵ)/(b+ϵ)
+safedivide(a, b, v=1.) = (a+(ϵ*v))/(b+ϵ)
 decimal(a) = a - floor(a)
 Base.getindex(d::Dict{Tuple{T,T}}, i, j) where {T<:Integer} = d[(i,j)]
 argfilter(fn, x) = [i for (i,x) in enumerate(x) if fn(x)]
@@ -14,7 +14,7 @@ function squeeze(a; dims=nothing)
 end
 
 function expand(a; dims)
-    dims = sort([dims...])# .+ (0:length(dims)-1)
+    dims = sort([dims...])
     i = [size(a)...]
     for d in dims
         insert!(i, d, 1)
@@ -42,30 +42,43 @@ end
 
 argcut(r::Array, j, i) = squeezesum(r[i:j,..], dims=1)
 
-"""
-function argcut(r::Array, j, i)
-    c = (r isa Vector) ? [0.] : zero(r[1,..])
-    inti, intj = Int(floor(i))+1, Int(ceil(j))
-    if (intj == j)
-        intj -= 1
-        dec = 1.
-    else
-        dec = decimal(j)
+function cumvalarg(cumr, v, starti, stopi)
+    if starti <= 0
+        return (starti+1, 0.)
     end
+    i = starti
+    while i <= stopi
+        if v < cumr[i]
+            tmp1 = (i > 1) ? cumr[i-1] : 0.
+            tmp2 = (i > 1) ? max(0., cumr[i] - cumr[i-1]) : cumr[i]
+            return (i, safedivide((v - tmp1), tmp2))
+        end
+        i += 1
+    end
+    return (stopi+1, 0.)
+end
 
-    @show (i, " ", j)
-    @show (inti, " ", intj)
 
-    if inti == intj
-        c .= r[inti,..] .* (j - i)
+function incost(ocosts, st, rtraca, rtracb)
+    c = zeros(size(ocosts)[2:end])
+
+    if rtracb == T+1
+        c .= M
     else
-        c .= r[inti,..] .* (inti - i)
-        c .+= r[intj,..] .* dec
-        if intj > inti + 1
-            c .+= squeezesum(r[(inti+1):(intj-1),..], dims=1)
+        t = floor(tracker(st[rtracb]) + 1e-10)
+        if rtraca == rtracb
+            c .= ocosts[rtraca,..] .+ α * (rtraca - t)
+        else
+            fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
+            fracs[1] = clamp(fracs[1], 0., 1.)
+            fracs[end] = clamp(fracs[end], 0., 1.)
+            fracs[2:end] .-= fracs[1:(end-1)]
+
+            for (f,rt) in zip(fracs, rtraca:rtracb)
+                c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
+            end
         end
     end
 
-    return c
+    return round.(c, digits=ROUND_DIGITS)
 end
-"""
