@@ -112,13 +112,13 @@ function add_link!(net, l::Link)
 end
 
 @with_kw struct LinkState
-    trac::Integer # tracker - floating point value
-    frac::AbstractFloat # fraction of the flow already moved from the cohort of 'trac'
+    trac::AbstractFloat # tracker - floating point value
+    #frac::AbstractFloat # fraction of the flow already moved from the cohort of 'trac'
     sval::AbstractFloat # sending value
     rval::AbstractFloat # receiving value
 end
 
 tracker(ls::LinkState) = ls.trac
-fracmoved(ls::LinkState) = ls.frac
+#fracmoved(ls::LinkState) = ls.frac
 svalue(ls::LinkState) = ls.sval
 rvalue(ls::LinkState) = ls.rval

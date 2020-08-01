@@ -1,124 +1,91 @@
-function simulate()#(DTC, SR)
-    global net, Fᵢ, Fₒ, CFᵢ, CFₒ, states
+#function simulate()#(DTC, SR)
+#global net, CFᵢ, CFₒ, states
 
-    # initialization
-    Fᵢ = zeros(nlinks, T, nsinks, nclasses); # inflows
-    Fₒ = zeros(nlinks, T, nsinks, nclasses); # outflows
-    CFᵢ = zeros(nlinks, T); # cumulative inflows
-    CFₒ = zeros(nlinks, T); # cumulative outflows
-    for src in sources(net)
-        li = outlinkids(net,src)[1]
-        for (snkno,snk) in enumerate(sinks(net))
-            for c in 1:nclasses
-                Fᵢ[li,:,snkno,c] .= round.(DTC[src,snk,c] * trips[src,snk,c], digits=ROUND_DIGITS)
-            end
-        end
+# initialization
+pᵢ = zeros(nlinks, T, nsinks, nclasses); # inflow proportions
+CFᵢ = zeros(nlinks, T); # cumulative inflows
+CFₒ = zeros(nlinks, T); # cumulative outflows
+for (rno,r) in enumerate(sources(net))
+    tmp = @view DTC[:,rno,..]
+    pᵢ[rno,..] .= tmp./max.(Ref(1e-16), sum(tmp, dims=(2,3)))
+    CFᵢ[rno,:] .= cumsum(squeezesum(tmp .* expand(trips[rno,..], dims=1), dims=(2,3)))
+end
+
+rlinkids = [outlinkids(net, r)[1] for r in srcs]
+states = Matrix{Union{Nothing, LinkState}}(fill(nothing, nlinks, T+1))
+for i in 1:nlinks
+    l = length(link(net, i))
+    for j in 1:l
+        states[i,j] = LinkState(j-1-l, 0., (i in rlinkids) ? Inf : Q)
     end
-    CFᵢ .= cumsum(squeezesum(Fᵢ, dims=(3,4)), dims=2)
+end
 
-    srclinkids = [outlinkids(net,src)[1] for src in srcs];
-    states = Matrix{Union{Nothing, LinkState}}(fill(nothing, nlinks, T+1));
-    for i in 1:nlinks
-        l = length(link(net, i))
-        # a link of length 2 - min. time for outflow is 3 => at the beginning of time 1, (-1, 0.)
-        for j in 1:l
-            states[i,j] = LinkState(-l+j, 0., 0., (i in srclinkids) ? Inf : N*l)
-        end
+for t in 1:T
+    tracs = zeros(nlinks)
+
+    for k in snks
+        li = inlinkids(net,k)[1]
+        l = length(link(net, li))
+
+        CFₒ[li,t] = (t > l) ? CFᵢ[li,t-l] : 0.
+        tracs[li] = tracker(states[li,t]) + 1
     end
 
-    for t in 1:T
-        A = ones(Int, nlinks);
-        fracs = zeros(nlinks);
-        for snk in snks
-            i = inlinkids(net,snk)[1]
-            lnk = link(net, i)
-            l = length(lnk)
+    for m in mrgs
+        #@show t, m
+        # sending and receiving capacities
+        ili = inlinkids(net,m)
+        oli = outlinkids(net,m)[1]
+        sval = svalue.(states[ili,t])
+        rval = rvalue(states[oli,t])
 
-            Fₒ[i,t,:,:] .= (t > l) ? Fᵢ[i,t-l,:,:] : 0.
+        ls = length.(link.(Ref(net), ili))
 
-            A[i] = tracker(states[i,t]) + 1
-        end
+        # cuminflows, props, sval, rval, tracs, maxt
+        newcf, p, newtracs = mflows([@view(CFᵢ[ili[1],:]), @view(CFᵢ[ili[2],:])], [@view(pᵢ[ili[1],..]), @view(pᵢ[ili[2],..])], sval, rval, tracker.(states[ili,t]), t.-ls)
 
-        for mrg in mrgs
-            # sending and receiving capacities
-            ili = inlinkids(net,mrg)
-            oli = outlinkids(net,mrg)[1]
-            s = svalue.(states[ili,t])
-            r = rvalue(states[oli,t])
+        CFᵢ[oli,t] = round(sum(newcf), digits=ROUND_DIGITS)
+        CFₒ[ili,t] .= round.(newcf, digits=ROUND_DIGITS)
+        pᵢ[oli,t,..] .= p
+        tracs[ili] .= newtracs
+    end
 
-            # calculating flows
-            trkr = tracker.(states[ili,t])
-            ls = length.(link.(Ref(net), ili))
-            f = [(t > l) ? Fᵢ[li, trkr[i]:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)  for (i,(li,l)) in enumerate(zip(ili, ls))]
-            fₐ, va = mflows(f, r, s, fracmoved.(states[ili,t]))
+    for d in divs
+        #@show t, d
+        # sending and receiving capacities
+        ili = inlinkids(net,d)[1]
+        oli = outlinkids(net,d)
+        sval = svalue(states[ili,t])
+        rval = rvalue.(states[oli,t])
 
-            va = round.(va, digits=ROUND_DIGITS)
+        l = length(link(net, ili))
 
-            for (i,li) in enumerate(ili)
-                fₐ[i] .= round.(fₐ[i], digits=ROUND_DIGITS)
-                Fₒ[li,t,..] .= fₐ[i]
-            end
-            Fᵢ[oli,t,..] .= sum(fₐ, dims=1)[1,..]
+        # cuminflows, props, sr, sval, rval, trac, maxt
+        if t > l
+            sr = [SR[d][ti][t,..] for ti in 1:2]
+            newcf, p, newtrac, newtf = dflows((@view(CFᵢ[ili,:])), @view(pᵢ[ili,..]), sr, sval, rval, tracker(states[ili,t]), t-l)
 
-            for (i,li) in enumerate(ili)
-                CFₒ[li,t] = round(sum(Fₒ[li,t,..]) + ((t > 1) ? CFₒ[li,t-1] : 0.), digits=ROUND_DIGITS)
-                A[li], fracs[li] = cumvalarg((@view CFᵢ[li,:]), CFₒ[li,t], tracker(states[li,t]), t - ls[i])
-            end
-
-"""
-            A[ili] .= (trkr .+ Int.(floor.(va)))
-            fracs[ili] .= decimal.(va)"""
-        end
-
-        for div in divs
-            # sending and receiving capacities
-            ili = inlinkids(net,div)[1]
-            oli = outlinkids(net,div)
-            s = svalue(states[ili,t])
-            r = rvalue.(states[oli,t])
-
-            # calculating flows
-            sr = [SR[div][ti][t,..] for ti in 1:2]
-            trkr = tracker(states[ili,t])
-            l = length(link(net, ili))
-            fₐ, va = dflows(((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)), sr, r, s, fracmoved(states[ili,t]))
-
-            va = round(va, digits=ROUND_DIGITS)
-
+            CFᵢ[oli,t] .= round.(newtf .+ CFᵢ[oli,t-1], digits=ROUND_DIGITS)
+            CFₒ[ili,t] = round(newcf, digits=ROUND_DIGITS)
             for (i,li) in enumerate(oli)
-                fₐ[i] .= round.(fₐ[i], digits=ROUND_DIGITS)
-                Fᵢ[li,t,..] .= fₐ[i]
+                pᵢ[li,t,..] .= p[i]
             end
-            Fₒ[ili,t,..] .= sum(fₐ, dims=1)[1,..]
-
-            CFₒ[ili,t] = round(sum(Fₒ[ili,t,..]) + ((t > 1) ? CFₒ[ili,t-1] : 0.), digits=ROUND_DIGITS)
-            A[ili], fracs[ili] = cumvalarg((@view CFᵢ[ili,:]), CFₒ[ili,t], tracker(states[ili,t]), t - l)
-
-"""
-            A[ili] = (trkr + Int(floor(va)))
-            fracs[ili] = decimal(va)"""
+            tracs[ili] = newtrac
         end
+    end
 
-        # update cumulative flows
-        #CFᵢ[:,t] .= ((t > 1) ? CFᵢ[:,t-1] : 0.) .+ squeezesum(Fᵢ[:,t,..], dims=(2,3))
-        CFₒ[:,t] .= ((t > 1) ? CFₒ[:,t-1] : 0.) .+ squeezesum(Fₒ[:,t,..], dims=(2,3))
-
-        # update link states
-        for (i,lnk) in enumerate(net.links)
-            l = length(lnk)
-            sval, rval = - CFₒ[i,t],  -CFᵢ[i,t] + ((i in srclinkids) ? Inf : N*l)
-            sval = min(Q, sval + ((t >= l) ? CFᵢ[i,t+1-l] : 0.))
-            rval = min(Q, rval + ((t >= Int(round(l/δ))) ? CFₒ[i,t+1-Int(round(l/δ))] : 0.))
-            """if t >= l
-                sval = min(Q, sval + CFᵢ[i,t+1-l])
-                if t >= Int(round(l/δ))
-                    rval = min(Q, rval + CFₒ[i,t+1-Int(round(l/δ))])
-                end
-            end"""
-            sval = round(sval, digits=ROUND_DIGITS)
-            rval = round(rval, digits=ROUND_DIGITS)
-
-            states[i,t+1] = LinkState(A[i], fracs[i], sval, rval)
+    for (li,lnk) in enumerate(net.links)
+        l = length(lnk)
+        if t >= l
+            sval = round(min(Q, CFᵢ[li, t+1-l] - CFₒ[li,t]), digits=ROUND_DIGITS)
+            rval = if li in rlinkids
+                Inf
+            else
+                round(min(Q, ((t >= Int(round(l/δ))) ? CFₒ[li,t+1-Int(round(l/δ))] : 0.) - CFᵢ[li,t] + N*l), digits=ROUND_DIGITS)
+            end
+            states[li,t+1] = LinkState(tracs[li], sval, rval)
         end
     end
 end
+
+#end

@@ -22,26 +22,22 @@ function dijkstra(net::Network{T}, snk::U) where {T<:Integer, U<:Integer}
     childvec
 end
 
-
 function initchoices()
     # choice initialization
-    DTC = Dict(k => zeros(T) for k in keys(trips));
-    for k in keys(trips)
-        #DTC[k][1:Tm] .= rand(Tm)
-        #DTC[k][1:Tm] ./= sum(DTC[k][1:Tm])
-        #DTC[k][1:Tm] .= 1/Tm
-        DTC[k][1] = 1.
-    end
+    DTC = zeros(T, size(trips)...);
+    #DTC[1,..] .= 1.
+    DTC[1:Tm,...] .= rand(size(DTC[1:Tm,...])...)
+    DTC ./= sum(DTC, dims=1)
 
-    pathvecs = Dict(snk => dijkstra(net, snk) for snk in snks);
-    SR = Dict(div => Dict(i => zeros(T, nsinks, nclasses) for i in 1:2) for div in divs);
-    for div in divs
-        for (snkno,snk) in enumerate(snks)
-            for cls in 1:nclasses
-                if (outneighbors(net, div)[1] == pathvecs[snk][div])
-                    SR[div][1][:,snkno,cls] .= 1.
-                elseif (outneighbors(net, div)[2] == pathvecs[snk][div])
-                    SR[div][2][:,snkno,cls] .= 1.
+    pathvecs = Dict(k => dijkstra(net, k) for k in snks);
+    SR = Dict(d => Dict(i => zeros(T, nsinks, nclasses) for i in 1:2) for d in divs);
+    for d in divs
+        for (kno,k) in enumerate(snks)
+            for c in 1:nclasses
+                if (outneighbors(net, d)[1] == pathvecs[k][d])
+                    SR[d][1][:,kno,c] .= 1.
+                elseif (outneighbors(net, d)[2] == pathvecs[k][d])
+                    SR[d][2][:,kno,c] .= 1.
                 else
                     error()
                 end

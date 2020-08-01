@@ -151,3 +151,219 @@
         if (srcid == 1) && (snkid == 1) && (clsid == 1)
             @show a, m
         end
+
+
+
+function incost(ocosts, st, rtraca, rtracb)
+    c = zeros(size(ocosts)[2:end])
+
+    if rtracb == T+1
+        c .= M
+    else
+        t = floor(tracker(st[rtracb]) + 1e-10)
+        if rtraca == rtracb
+            c .= ocosts[rtraca,..] .+ α * (rtraca - t)
+        else
+            fracs = tracker.(st[rtraca:rtracb]) .- (t-1)
+            fracs[1] = clamp(fracs[1], 0., 1.)
+            fracs[end] = clamp(fracs[end], 0., 1.)
+            fracs[2:end] .-= fracs[1:(end-1)]
+
+            for (f,rt) in zip(fracs, rtraca:rtracb)
+                c .+= f * (α * (rt .- t) .+ ocosts[rt,..])
+            end
+        end
+    end
+
+    return round.(c, digits=ROUND_DIGITS)
+end
+
+function cumvalarg(cumr, v, starti, stopi)
+    if starti <= 0
+        return (starti+1, 0.)
+    end
+    i = starti
+    while i <= stopi
+        if v < cumr[i]
+            tmp1 = (i > 1) ? cumr[i-1] : 0.
+            tmp2 = (i > 1) ? max(0., cumr[i] - cumr[i-1]) : cumr[i]
+            return (i, safedivide((v - tmp1), tmp2))
+        end
+        i += 1
+    end
+    return (stopi+1, 0.)
+end
+
+
+
+function dflows(fᵢ, sr, r, s, m)
+    mval = [m*sum(fᵢ[1,..] .* sr[i]) for i in 1:2]
+    f = []
+    for (k,v) in pairs(sr)
+        push!(f, squeezesum(fᵢ .* expand(v, dims=1), dims=(2,3)))
+    end
+
+    sva = valarg(sum(f), s, sum(mval))
+    rva = min(valarg.(f, r, mval)...)
+    va = min(sva, rva)
+
+    fₐ = []
+    for (i,(k,v)) in enumerate(pairs(sr))
+        push!(fₐ, argcut(fᵢ, va, m) .* v)
+    end
+
+    return (fₐ, va)
+end
+
+
+
+function mflows(cf, p, sval, rval, tracs, maxt)
+    cfo = [0., 0.]
+    pₐ = zeros(2, size(cf[1])[2:end]...) #[zeros(size(cf[1])[2:end]) for _ in 1:2]
+    newtracs = [0., 0.]
+
+    function update!(i, cap)
+        cfo[i] = cf[tracs[i]] + cap
+        tmparg .= cvalarg(cf, cval, fromt, maxt)
+        idxs = indexify(tracs[i]:maxt)
+        tmpf = squeezesum(expand(cfo[idxs], dims=(2,3)) .* pₐ[idxs,..], dims=(2,3))
+        pₐ[i] .= tmpf ./ sum(tmpf)
+    end
+
+    if rval >= sum(sval)
+        update!(1, sval[1]) #free
+        update!(2, sval[2]) #free
+    elseif sval[1] < 0.5*rval
+        update!(1, sval[1]) #free
+        update!(2, rval-sval[1]) #cong
+    elseif sval[2] < 0.5*rval
+        update!(1, rval-sval[2]) #free
+        update!(2, sval[2]) #cong
+    else
+        update!(1, 0.5*rval) #cong
+        update!(2, 0.5*rval) #cong
+    end
+
+    return (cfo, pₐ, newtracs)
+end
+
+
+function mflows(fᵢ, r, s, m)
+    fₐ = [zeros(size(fᵢ[1])[2:end]...) for i in 1:2]
+    va = [0., 0.]
+
+    function update!(i, cap)
+        va[i] = valarg(fᵢ[i], cap, m[i]*sum(fᵢ[i][1,..]))
+        fₐ[i] .= argcut(fᵢ[i], va[i], m[i])
+    end
+
+    if r >= sum(s)
+        update!(1, s[1]) #free
+        update!(2, s[2]) #free
+    elseif s[1] < 0.5*r
+        update!(1, s[1]) #free
+        update!(2, r-s[1]) #cong
+    elseif s[2] < 0.5*r
+        update!(1, r-s[2]) #free
+        update!(2, s[2]) #cong
+    else
+        update!(1, 0.5*r) #cong
+        update!(2, 0.5*r) #cong
+    end
+
+    return (fₐ, va)
+end
+
+
+
+for t in 1:T
+    for mrg in mrgs
+        # calculating flows
+        trkr = tracker.(states[ili,t])
+        ls = length.(link.(Ref(net), ili))
+        f = [(t > l) ? Fᵢ[li, trkr[i]:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)  for (i,(li,l)) in enumerate(zip(ili, ls))]
+        fₐ, va = mflows(f, r, s, fracmoved.(states[ili,t]))
+
+        va = round.(va, digits=ROUND_DIGITS)
+
+        for (i,li) in enumerate(ili)
+            fₐ[i] .= round.(fₐ[i], digits=ROUND_DIGITS)
+            Fₒ[li,t,..] .= fₐ[i]
+        end
+        Fᵢ[oli,t,..] .= sum(fₐ, dims=1)[1,..]
+
+        for (i,li) in enumerate(ili)
+            CFₒ[li,t] = round(sum(Fₒ[li,t,..]) + ((t > 1) ? CFₒ[li,t-1] : 0.), digits=ROUND_DIGITS)
+            tracs[li], fracs[li] = cumvalarg((@view CFᵢ[li,:]), CFₒ[li,t], tracker(states[li,t]), t - ls[i])
+        end
+
+"""
+        tracs[ili] .= (trkr .+ Int.(floor.(va)))
+        fracs[ili] .= decimal.(va)"""
+    end
+
+    for div in divs
+        # calculating flows
+        sr = [SR[div][ti][t,..] for ti in 1:2]
+        trkr = tracker(states[ili,t])
+        l = length(link(net, ili))
+        fₐ, va = dflows(((t > l) ? Fᵢ[ili, trkr:(t - l),..] : zeros(1, size(Fᵢ)[3:end]...)), sr, r, s, fracmoved(states[ili,t]))
+
+        va = round(va, digits=ROUND_DIGITS)
+
+        for (i,li) in enumerate(oli)
+            fₐ[i] .= round.(fₐ[i], digits=ROUND_DIGITS)
+            Fᵢ[li,t,..] .= fₐ[i]
+        end
+        Fₒ[ili,t,..] .= sum(fₐ, dims=1)[1,..]
+
+        CFₒ[ili,t] = round(sum(Fₒ[ili,t,..]) + ((t > 1) ? CFₒ[ili,t-1] : 0.), digits=ROUND_DIGITS)
+        tracs[ili], fracs[ili] = cumvalarg((@view CFᵢ[ili,:]), CFₒ[ili,t], tracker(states[ili,t]), t - l)
+
+"""
+        tracs[ili] = (trkr + Int(floor(va)))
+        fracs[ili] = decimal(va)"""
+    end
+
+    # update cumulative flows
+    #CFᵢ[:,t] .= ((t > 1) ? CFᵢ[:,t-1] : 0.) .+ squeezesum(Fᵢ[:,t,..], dims=(2,3))
+    CFₒ[:,t] .= ((t > 1) ? CFₒ[:,t-1] : 0.) .+ squeezesum(Fₒ[:,t,..], dims=(2,3))
+end
+#end
+
+
+
+function costupdate!(i, τ)
+    x, y = a[i,τ], a[i,τ+1]
+    if y == T+1
+        ECᵢ[i,τ,..] .= M
+    elseif x == y
+        ECᵢ[i,τ,..] .= (x - τ) .+ ECₒ[i,x,..]
+    else
+        tf = max(0., CFᵢ[i,τ] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.))
+        ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), tf)
+        ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), tf, 0.)
+        #ECᵢ[i,τ,..] .= ((x - τ) .+ ECₒ[i,x,..]) * safedivide(max(0., CFₒ[i,x] - ((τ > 1) ? CFᵢ[i,τ-1] : 0.)), TFᵢ[i,τ])
+        #ECᵢ[i,τ,..] .+= ((y - τ) .+ ECₒ[i,y,..]) * safedivide(max(0., CFₒ[i,τ] - CFᵢ[i,y-1]), TFᵢ[i,τ], 0.)
+        if y > x+1
+            ECᵢ[i,τ,..] .+= squeezesum(((((x+1):(y-1)) .- τ) .+ ECₒ[i,(x+1):(y-1),..]) .* expand(safedivide.(TFₒ[i,(x+1):(y-1)], Ref(TFᵢ[i,τ])), dims=(2,3)), dims=1)
+        end
+    end
+
+    ECᵢ[i,τ,..] .= round.(ECᵢ[i,τ,..], digits=ROUND_DIGITS)
+end
+
+
+"""
+function cvalarg(r::AbstractArray, v, starti=0, maxi=size(r)[1])
+    i = starti
+    while i < maxi
+        totr = r[i+1] - r[i]
+        if v < totr
+            return i + ((v - r[i-1])/totr)
+        end
+        i += 1
+    end
+
+    return maxi
+end"""

@@ -1,70 +1,60 @@
+function mflows(cf, p, sval, rval, tracs, maxt; digits=ROUND_DIGITS)
+    newcf = [0., 0.]
+    newtracs = [0., 0.]
+    newp = zeros(size(p[1])[2:end]...)
 
-"""
-    dflows(fᵢ, sr, r, s, m)
-
-Compute flows at a diverging intersection.
-
-# Arguments
-- `fᵢ::Array`: slice from inflows from the range relevant to the computation
-- `sr::Array`: splitting rates
-- `r::Array`: receiving capacities
-- `s::Float`: sending capacity
-- `m::Float`: flow already moved from the first timestep of fᵢ
-
-"""
-function dflows(fᵢ, sr, r, s, m)
-    mval = [m*sum(fᵢ[1,..] .* sr[i]) for i in 1:2]
-    f = []
-    for (k,v) in pairs(sr)
-        push!(f, squeezesum(fᵢ .* expand(v, dims=1), dims=(2,3)))
+    function update!(i, f)
+        newcf[i] = cf[i][tracs[i]] + f
+        newtracs[i] = cvalarg(cf[i], newcf[i], tracs[i], maxt[i])
     end
 
-    sva = valarg(sum(f), s, sum(mval))
-    rva = min(valarg.(f, r, mval)...)
-    va = min(sva, rva)
-
-    fₐ = []
-    for (i,(k,v)) in enumerate(pairs(sr))
-        push!(fₐ, argcut(fᵢ, va, m) .* v)
+    if rval >= sum(sval)
+        update!(1, sval[1]) #free
+        update!(2, sval[2]) #free
+    elseif sval[1] < 0.5*rval
+        update!(1, sval[1]) #free
+        update!(2, rval-sval[1]) #cong
+    elseif sval[2] < 0.5*rval
+        update!(1, rval-sval[2]) #free
+        update!(2, sval[2]) #cong
+    else
+        update!(1, 0.5*rval) #cong
+        update!(2, 0.5*rval) #cong
     end
 
-    return (fₐ, va)
+    #newcf = round.(newcf, digits=ROUND_DIGITS)
+    newtracs = round.(newtracs, digits=ROUND_DIGITS)
+
+    for i in 1:2
+        rng = tracs[i]:newtracs[i]
+        if size(rng) > 0.
+            newp .+= squeezesum(mucsum(cf[i], rng) .* p[i][indexify(rng),..], dims=1)
+        end
+    end
+    if sum(newp) == 0.
+        newp .= 1. /prod(size(newp))
+    else
+        newp ./= sum(newp)
+    end
+
+    return (newcf, newp, newtracs)
 end
 
-"""
-    mflows(fᵢ, sr, r, s, m)
+function dflows(cf, p, sr, sval, rval, trac, maxt; digits=ROUND_DIGITS)
+    rng = trac:maxt
+    fcut = [(mucsum(cf, rng) .* p[indexify(rng),..]) .* expand(sr[i], dims=1) for i in 1:2] # flow cut
+    sva = valarg(sum(fcut), sval, 1)
+    rva = min(valarg.(fcut, rval, 1)...)
+    va = min(sva, rva)
 
-Compute flows at a merging intersection.
+    tmp = [squeezesum(fcut[i][0.:va,..], dims=1) for i in 1:2]
+    newp = [(sum(tmptmp) == 0.) ? ones(size(tmptmp)...)*(1. /prod(size(tmptmp))) : (tmptmp ./ sum(tmptmp)) for tmptmp in tmp]
 
-# Arguments
-- `fᵢ::Array`: slice from inflows from the range relevant to the computation
-- `r::Float`: receiving capacity
-- `s::Array`: sending capacities
-- `m::Float`: flow already moved from the first timestep of fᵢ
+    newcf = cf[trac] + sum(sum(tmp))
+    newtrac = cvalarg(cf, newcf, trac, maxt)
 
-"""
-function mflows(fᵢ, r, s, m)
-    fₐ = [zeros(size(fᵢ[1])[2:end]...) for i in 1:2]
-    va = [0., 0.]
+    #newcf = round.(newcf, digits=ROUND_DIGITS)
+    newtrac = round(newtrac, digits=ROUND_DIGITS)
 
-    function update!(i, cap)
-        va[i] = valarg(fᵢ[i], cap, m[i]*sum(fᵢ[i][1,..]))
-        fₐ[i] .= argcut(fᵢ[i], va[i], m[i])
-    end
-
-    if r >= sum(s)
-        update!(1, s[1]) #free
-        update!(2, s[2]) #free
-    elseif s[1] < 0.5*r
-        update!(1, s[1]) #free
-        update!(2, r-s[1]) #cong
-    elseif s[2] < 0.5*r
-        update!(1, r-s[2]) #free
-        update!(2, s[2]) #cong
-    else
-        update!(1, 0.5*r) #cong
-        update!(2, 0.5*r) #cong
-    end
-
-    return (fₐ, va)
+    return (newcf, newp, newtrac, [sum(tmptmp) for tmptmp in tmp])
 end

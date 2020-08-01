@@ -13,8 +13,7 @@ using EllipsisNotation
 
 Notation:
 
-Fᵢ      - inflows
-Fₒ      - outflows
+pᵢ      - inflow proportions
 TFᵢ     - total (or) aggregated inflows
 TFₒ     - total (or) aggregated outflows
 CFᵢ     - cumulative inflows
@@ -47,9 +46,7 @@ net = Network(linkdata);
 
 nclasses, nsinks, nlinks = 1, 2, numlinks(net);
 srcs, snks, mrgs, divs = sources(net), sinks(net), merges(net), diverges(net);
-trips = Dict((o,d,c) => demand_level for o in srcs for d in snks for c in 1:nclasses);
-
-Fᵢ, Fₒ, CFᵢ, CFₒ, states, ECᵢ, ECₒ = nothing, nothing, nothing, nothing, nothing, nothing, nothing;
+trips = ones(length(srcs), length(snks), nclasses) .* demand_level;
 
 include("initchoices.jl");
 include("simulation.jl");

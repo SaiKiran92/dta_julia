@@ -13,21 +13,22 @@ end
 
 (::Colon)(a::T, b::T) where {T<:AbstractFloat} = ContinuousRange(a,b)
 
-ϵ = 1e-10;
+ϵ = 1e-15;
 start(c::ContinuousRange) = c.a
 stop(c::ContinuousRange) = c.b
 firstidx(c::ContinuousRange) = Int(ceil(start(c)+ϵ))
 lastidx(c::ContinuousRange) = Int(ceil(stop(c)))
+indexify(c::ContinuousRange) = firstidx(c):lastidx(c)
 size(c::ContinuousRange) = c.b - c.a
 show(io::IO, c::ContinuousRange) = print(io, repr(start(c)), ':', repr(stop(c)))
 
-function getindex(v::Array{T}, c::ContinuousRange, rest...) where {T<:AbstractFloat}
+function getindex(v::AbstractArray{T}, c::ContinuousRange, rest...) where {T<:AbstractFloat}
     ai,bi = firstidx(c), lastidx(c)
     ai = (ai <= 0) ? 1 : ai
     bi = (bi == 0) ? -1 : bi
 
     if ai > bi
-        if typeof(rest[1]) == EllipsisNotation.Ellipsis
+        if (length(rest) > 0) && (typeof(rest[1]) == EllipsisNotation.Ellipsis)
             return zeros(1, size(v)[2:end]...)
         else
             u = [i[1] for i in size.(rest) if length(i)!=0]
@@ -45,5 +46,5 @@ function getindex(v::Array{T}, c::ContinuousRange, rest...) where {T<:AbstractFl
     return rv
 end
 
-getindex(a::Array, c::ContinuousRange, rest...) = getindex(convert(Array{Float64}, a), c, rest...)
-getindex(a::Array, i::Int, c::ContinuousRange, rest...) = getindex(a[i,..], c, rest...)
+getindex(a::AbstractArray, c::ContinuousRange, rest...) = getindex(convert(Array{Float64}, a), c, rest...)
+getindex(a::AbstractArray, i::Int, c::ContinuousRange, rest...) = getindex(a[i,..], c, rest...)
