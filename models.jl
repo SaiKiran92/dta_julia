@@ -1,11 +1,9 @@
 function mflows(cf, p, sval, rval, tracs, maxt; digits=ROUND_DIGITS)
-    newcf = [0., 0.]
     newtracs = [0., 0.]
-    newp = zeros(size(p[1])[2:end]...)
 
     function update!(i, f)
-        newcf[i] = cf[i][tracs[i]] + f
-        newtracs[i] = cvalarg(cf[i], newcf[i], tracs[i], maxt[i])
+        #newcf[i] = cf[i][tracs[i]] + f
+        newtracs[i] = cvalarg(cf[i], cf[i][tracs[i]] + f, tracs[i], maxt[i])
     end
 
     if rval >= sum(sval)
@@ -21,10 +19,11 @@ function mflows(cf, p, sval, rval, tracs, maxt; digits=ROUND_DIGITS)
         update!(1, 0.5*rval) #cong
         update!(2, 0.5*rval) #cong
     end
-
-    #newcf = round.(newcf, digits=ROUND_DIGITS)
     newtracs = round.(newtracs, digits=ROUND_DIGITS)
 
+    newcf = round.([cf[i][newtracs[i]] for i in 1:2], digits=ROUND_DIGITS)
+
+    newp = zeros(size(p[1])[2:end]...)
     for i in 1:2
         rng = tracs[i]:newtracs[i]
         if size(rng) > 0.
@@ -50,11 +49,10 @@ function dflows(cf, p, sr, sval, rval, trac, maxt; digits=ROUND_DIGITS)
     tmp = [squeezesum(fcut[i][0.:va,..], dims=1) for i in 1:2]
     newp = [(sum(tmptmp) == 0.) ? ones(size(tmptmp)...)*(1. /prod(size(tmptmp))) : (tmptmp ./ sum(tmptmp)) for tmptmp in tmp]
 
-    newcf = cf[trac] + sum(sum(tmp))
-    newtrac = cvalarg(cf, newcf, trac, maxt)
-
-    #newcf = round.(newcf, digits=ROUND_DIGITS)
+    newtrac = cvalarg(cf, cf[trac] + sum(sum(tmp)), trac, maxt)
     newtrac = round(newtrac, digits=ROUND_DIGITS)
 
-    return (newcf, newp, newtrac, [sum(tmptmp) for tmptmp in tmp])
+    newcf = round(cf[newtrac], digits=ROUND_DIGITS)
+
+    return (newcf, newp, newtrac, sum.(tmp))#[sum(tmptmp) for tmptmp in tmp])
 end

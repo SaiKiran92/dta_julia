@@ -83,6 +83,10 @@ for t in 1:T
             else
                 round(min(Q, ((t >= Int(round(l/δ))) ? CFₒ[li,t+1-Int(round(l/δ))] : 0.) - CFᵢ[li,t] + N*l), digits=ROUND_DIGITS)
             end
+
+            sval = max.(Ref(0.), sval)
+            rval = max(0., rval)
+            
             states[li,t+1] = LinkState(tracs[li], sval, rval)
         end
     end

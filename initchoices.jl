@@ -26,7 +26,7 @@ function initchoices()
     # choice initialization
     DTC = zeros(T, size(trips)...);
     #DTC[1,..] .= 1.
-    DTC[1:Tm,...] .= rand(size(DTC[1:Tm,...])...)
+    DTC[1:Tm,..] .= rand(size(DTC[1:Tm,..])...)
     DTC ./= sum(DTC, dims=1)
 
     pathvecs = Dict(k => dijkstra(net, k) for k in snks);

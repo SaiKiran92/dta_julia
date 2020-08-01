@@ -14,8 +14,6 @@ using EllipsisNotation
 Notation:
 
 pᵢ      - inflow proportions
-TFᵢ     - total (or) aggregated inflows
-TFₒ     - total (or) aggregated outflows
 CFᵢ     - cumulative inflows
 CFₒ     - cumulative outflows
 ECᵢ      - expected costs of vehicles coming in
@@ -26,7 +24,7 @@ SR      - splitting rates
 
 =#
 
-ROUND_DIGITS = 10
+ROUND_DIGITS = 13
 
 include("types.jl")
 include("crange.jl")
@@ -53,7 +51,7 @@ include("simulation.jl");
 include("costcomputation.jl");
 include("equilibrium.jl");
 
-DTC, SR = initchoices();
+DTC, SR = initchoices()
 simulate();
 computecosts();
 relgap(ECᵢ, DTC)
