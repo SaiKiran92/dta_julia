@@ -71,13 +71,14 @@ end
 
 function solveqp(c, dtc, λ)
     p = dtc .- λ * c
-    x = Variable(length(p))
+    """x = Variable(length(p))
     problem = minimize(0.5*sumsquares(x - p), sum(x) == 1, x >= 0.)
     solve!(problem, () -> SCS.Optimizer(verbose=false))
     if (problem.status != MOI.OPTIMAL)
         @show c, dtc, λ
     end
-    return x.value
+    return x.value"""
+    return projpx(p)
 end
 
 function proportionalize(x; digits=6)

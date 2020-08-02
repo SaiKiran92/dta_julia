@@ -98,3 +98,19 @@ function valarg(r::AbstractArray, v, starti=1, maxi=size(r)[1])
 end
 
 argcut(r::AbstractArray, j, i) = squeezesum(r[i:j,..], dims=1)
+
+function projpx(u::Array) # projection onto a probability simplex
+    v = sort(u, rev=true)
+    
+    vsum, lv = 0., 0.
+    for j in 1:length(u)
+        if v[j] + (1.0/j)*(1 - vsum - v[j]) > 0.
+            vsum += v[j]
+        else
+            lv = (1.0/(j-1))*(1 - vsum) # lagrange variable
+            break
+        end
+    end
+
+    return max.(u .+ lv, Ref(0.))
+end
