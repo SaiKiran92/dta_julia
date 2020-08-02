@@ -44,13 +44,11 @@ end
 
 function mucsum(v::AbstractVector, rng::ContinuousRange)
     i, j = firstidx(rng), lastidx(rng)
-    rv = mucsum(v[i:j])
-    if i > 1
-        rv[1] -= v[i-1]
-    end
+    rv = mucsum(v[i:j] .- ((i == 1) ? 0. : v[i-1]))
+
     if i == j
         rv .*= size(rng)
-    elseif i > j
+    elseif i < j
         rv[1] *= (1 - decimal(start(rng)))
         rv[end] *= decimal(stop(rng))
     end
@@ -69,6 +67,18 @@ function cvalarg(cvec::AbstractVector, cval, starttrac, maxt)
         end
     end
     return maxt
+end
+
+function rcvalarg(cvec::AbstractVector, cval, endtrac, mint)
+    t = Int(floor(endtrac))
+    while (t >= mint)
+        if (cvec[t] < cval)# && !(cvec[t] ≈ cval)
+            return (t+1) - (cvec[t+1] - cval)/(cvec[t+1] - cvec[t])
+        else
+            t -= 1
+        end
+    end
+    return mint
 end
 
 function valarg(r::AbstractArray, v, starti=1, maxi=size(r)[1])

@@ -1,16 +1,19 @@
 
 # UE computation
 function updatechoices!()#(ECᵢ, DTC, SR)
-    global ECᵢ, DTC, SR
-    λ = 1e-3
-    for src in srcs
+    global ECᵢ#, DTC, SR
+    newDTC = zero(DTC)
+    #newSR = SR
+    newSR = Dict(d => Dict(i => zeros(T, nsinks, nclasses) for i in 1:2) for d in divs);
+    λ = 1e-4
+    for (srcid,src) in enumerate(srcs)
         i = outlinkids(net, src)[1]
         for (snkid,snk) in enumerate(snks)
             for clsid in 1:nclasses
                 c = ECᵢ[i,1:Tm,snkid,clsid]
-                dtc = DTC[src,snk,clsid][1:Tm]
+                dtc = DTC[1:Tm, srcid,snkid,clsid]
                 newdtc = proportionalize(solveqp(c, dtc, λ))[:,1]
-                DTC[src,snk,clsid][1:Tm] .= newdtc
+                newDTC[1:Tm, srcid,snkid,clsid] .= newdtc
             end
         end
     end
@@ -24,12 +27,14 @@ function updatechoices!()#(ECᵢ, DTC, SR)
                     c = ECᵢ[oli,t,snkid,clsid]
                     newsr = proportionalize(solveqp(c, sr, λ))[:,1]
                     for i in 1:2
-                        SR[div][i][t,snkid,clsid] = newsr[i]
+                        newSR[div][i][t,snkid,clsid] = newsr[i]
                     end
                 end
             end
         end
     end
+
+    return newDTC, newSR
 end
 
 function relgap(ECᵢ, DTC)
@@ -39,7 +44,7 @@ function relgap(ECᵢ, DTC)
         for (snkid,snk) in enumerate(snks)
             for clsid in 1:nclasses
                 m = minimum(ECᵢ[i,1:Tm,snkid,clsid])
-                a = sum(ECᵢ[i,1:Tm,snkid,clsid] .* DTC[src,snk,clsid][1:Tm])
+                a = sum(ECᵢ[i,1:Tm,snkid,clsid] .* DTC[1:Tm, srcid,snkid,clsid])
                 _num += (a - m)
                 _den += m
             end

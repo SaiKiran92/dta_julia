@@ -51,28 +51,35 @@ include("simulation.jl");
 include("costcomputation.jl");
 include("equilibrium.jl");
 
-DTC, SR = initchoices()
-simulate();
-computecosts();
+DTC, SR = initchoices();
+
+i = 5; DTC, SR = DTC_list[i], SR_list[i];
+CFᵢ, CFₒ, states = simulate();
+ECᵢ, ECₒ, rtracs = computecosts();
 relgap(ECᵢ, DTC)
 
-updatechoices!()
+DTC, SR = updatechoices!()
 
 relgap(ECᵢ, DTC)
 
 
+DTC_list = [DTC]
+SR_list = [SR]
 
 for i in 1:30
-    global DTC, SR, ECᵢ, ECₒ
+    global DTC, SR, CFᵢ, CFₒ, ECᵢ, ECₒ
     #@show i
-    Fᵢ, Fₒ, states = simulate()#(DTC, SR)
-    ECᵢ, ECₒ = computecosts()#(states)
-    relgap(ECᵢ, DTC)
+    CFᵢ, CFₒ, states = simulate()#(DTC, SR)
+    ECᵢ, ECₒ, rtracs = computecosts()#(states)
+    @show relgap(ECᵢ, DTC)
 
-    @assert approxpositive(Fᵢ) # all((Fᵢ .>= 0.) .| (Fᵢ .≈ 0.))
-    @assert approxpositive(Fₒ) # all(Fₒ .>= 0.)
-    @assert approxpositive(ECᵢ) # all(ECᵢ .>= 0.)
-    @assert approxpositive(ECₒ) # all(ECₒ .>= 0.)
+    #@assert approxpositive(Fᵢ) # all((Fᵢ .>= 0.) .| (Fᵢ .≈ 0.))
+    #@assert approxpositive(Fₒ) # all(Fₒ .>= 0.)
+    @assert all(ECᵢ .>= 0.)
+    @assert all(ECₒ .>= 0.)
 
-    updatechoices!() #(ECᵢ, DTC, SR)
+    newDTC, newSR = updatechoices!() #(ECᵢ, DTC, SR)
+    push!(DTC_list, DTC)
+    push!(SR_list, SR)
+    DTC, SR = newDTC, newSR
 end
